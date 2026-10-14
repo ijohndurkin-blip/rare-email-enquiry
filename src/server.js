@@ -538,8 +538,9 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
-  app.listen(port, () => {
-    console.log(`Enquiry dashboard running on http://localhost:${port}`);
+  const host = process.env.HOST || '0.0.0.0'; // set HOST=127.0.0.1 behind nginx
+  app.listen(port, host, () => {
+    console.log(`Enquiry dashboard running on http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
     if (!process.env.ADMIN_PASSWORD) console.log(`Admin password: ${ADMIN_PASSWORD}  (set ADMIN_PASSWORD to choose your own)`);
   });
   if (process.env.DISABLE_POLLER !== '1') inbox.startPoller();

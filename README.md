@@ -99,7 +99,9 @@ Open http://localhost:3000/admin. The admin password is printed in the terminal;
 
 ### Deploying
 
-It runs as one Node process with a SQLite file, so any small server or container host works:
+**On your own server (e.g. a 123-reg dedicated server):** follow [deploy/DEPLOY-123REG.md](deploy/DEPLOY-123REG.md). It covers the subdomain DNS record, Node.js, a systemd service, nginx with free HTTPS, updates and backups.
+
+It runs as one Node process with a SQLite file, so any small server or container host works. Serverless hosts like Vercel don't fit, because the app needs a persistent disk and runs background inbox checks and follow-ups. With Docker:
 
 ```bash
 docker build -t enquiries .
