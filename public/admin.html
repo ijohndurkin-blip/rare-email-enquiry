@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Businesses · Admin</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <style>
+    .biz-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .biz { display: flex; flex-direction: column; gap: 12px; }
+    .biz .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .biz .stats { display: flex; gap: 8px; flex-wrap: wrap; }
+    .settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+    .settings nav { position: sticky; top: 84px; display: grid; gap: 2px; }
+    .settings nav a { padding: 7px 10px; border-radius: 8px; color: var(--ink-2); }
+    .settings nav a:hover { background: var(--surface-2); text-decoration: none; }
+    .settings section { scroll-margin-top: 80px; margin-bottom: 16px; }
+    .settings section > h2 { margin-bottom: 4px; }
+    .settings section > p.lead { color: var(--ink-2); margin: 0 0 16px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+    .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; }
+    .savebar { position: sticky; bottom: 0; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(6px); padding: 12px 0; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--line); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .result { margin-top: 10px; font-size: 13px; }
+    .ok { color: var(--good); }
+    .thresholds { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 6px 0 4px; }
+    @media (max-width: 800px) {
+      .settings { grid-template-columns: 1fr; }
+      .settings nav { display: none; }
+      .two, .three { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">E</div>
+        <div class="brand-name">Enquiry Dashboard <span class="muted" style="font-weight:400">· Admin</span></div>
+      </div>
+      <div class="spacer"></div>
+      <button type="button" class="primary" id="newBtn">+ New business</button>
+      <button type="button" class="ghost" id="logout">Sign out</button>
+    </div>
+  </header>
+
+  <main class="wrap" id="main"></main>
+
+  <dialog id="newDialog">
+    <form id="newForm">
+      <h2 style="margin-bottom:14px">Set up a new business</h2>
+      <div class="field"><label for="nName">Business name</label><input id="nName" required placeholder="e.g. Harbour Kitchens"></div>
+      <div class="field"><label for="nColor">Brand colour</label><input id="nColor" type="color" value="#2a78d6" style="height:38px;padding:3px"></div>
+      <label class="chk field"><input type="checkbox" id="nDemo" checked> Fill with sample enquiries so I can show them the dashboard</label>
+      <div class="err" id="nErr"></div>
+      <div class="foot">
+        <button type="button" id="nCancel">Cancel</button>
+        <button type="submit" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="codeDialog">
+    <form method="dialog">
+      <h2 style="margin-bottom:10px">Dashboard login for <span id="cName"></span></h2>
+      <p class="ink-2">Send your client this link and access code. The code is only shown now — you can set a new one in Settings any time.</p>
+      <div class="field"><label>Dashboard link</label><pre id="cUrl"></pre></div>
+      <div class="field"><label>Access code</label><pre id="cCode" style="font-size:16px"></pre></div>
+      <div class="foot"><button type="button" id="cCopy">Copy both</button><button class="primary">Done</button></div>
+    </form>
+  </dialog>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/admin.js"></script>
+</body>
+</html>

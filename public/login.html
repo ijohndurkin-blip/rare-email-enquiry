@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <form class="card login" id="form">
+      <div class="brand">
+        <div class="brand-mark" id="mark">E</div>
+        <div>
+          <div class="brand-name" id="name">Enquiry Dashboard</div>
+          <div class="muted" id="sub">Admin sign in</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="password" id="pwlabel">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required autofocus>
+      </div>
+      <div class="err" id="err" role="alert"></div>
+      <button class="primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
+    </form>
+  </main>
+  <script src="/assets/common.js"></script>
+  <script>
+    const m = location.pathname.match(/^\/b\/([^/]+)\/login/);
+    const slug = m ? decodeURIComponent(m[1]) : null;
+    if (slug) {
+      api(`/api/b/${encodeURIComponent(slug)}/public`, { allow401: true }).then((b) => {
+        document.title = `${b.name} · Sign in`;
+        $('#name').textContent = b.name;
+        $('#mark').textContent = b.name.trim()[0].toUpperCase();
+        $('#mark').style.background = b.brandColor;
+        $('#sub').textContent = 'Enquiry dashboard';
+        $('#pwlabel').textContent = 'Access code';
+      }).catch(() => { $('#err').textContent = 'This business could not be found.'; });
+    }
+    $('#form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('#err').textContent = '';
+      try {
+        const r = await api('/api/login', { method: 'POST', body: { slug, password: $('#password').value }, allow401: true });
+        location.href = r.redirect;
+      } catch (err) {
+        $('#err').textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

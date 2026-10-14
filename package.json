@@ -1,0 +1,23 @@
+{
+  "name": "rare-email-enquiry",
+  "version": "1.0.0",
+  "description": "Email enquiry dashboard for businesses — captures enquiries from an inbox and scores them hot / warm / cold.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "seed": "node --disable-warning=ExperimentalWarning src/seed.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^5.3.0",
+    "imapflow": "^2.4.2",
+    "mailparser": "^3.9.39"
+  }
+}

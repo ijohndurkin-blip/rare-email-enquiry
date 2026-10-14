@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enquiries</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" id="brandMark">·</div>
+        <div class="brand-name" id="brandName">Enquiries</div>
+      </div>
+      <div class="spacer"></div>
+      <span class="muted hide-sm" id="syncStatus"></span>
+      <div class="segmented" role="group" aria-label="Time period" id="period">
+        <button type="button" data-days="7">7 days</button>
+        <button type="button" data-days="30" aria-pressed="true">30 days</button>
+        <button type="button" data-days="90">90 days</button>
+      </div>
+      <button type="button" class="primary" id="addBtn">+ Add enquiry</button>
+      <a class="btn ghost hidden" id="adminLink" href="/admin">Admin</a>
+      <button type="button" class="ghost" id="logout">Sign out</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="banner hidden" id="banner"></div>
+
+    <!-- Lead temperature at a glance -->
+    <section class="grid grid-temp" aria-label="Open leads by temperature" id="tempTiles"></section>
+    <div class="mix card" id="mix" style="padding:14px 18px"></div>
+
+    <!-- Key numbers -->
+    <section class="grid grid-kpi section" aria-label="Key numbers" id="kpis"></section>
+
+    <!-- Trend + needs attention -->
+    <section class="grid grid-main section">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Enquiries per day</h2>
+            <div class="sub" id="chartSub"></div>
+          </div>
+          <div class="legend" id="chartLegend"></div>
+        </div>
+        <div class="chart" id="chart"></div>
+        <details class="block" style="margin-top:8px">
+          <summary class="muted" style="cursor:pointer;font-size:12px">Show as table</summary>
+          <div class="table-wrap" id="chartTable"></div>
+        </details>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Reply to these next</h2>
+            <div class="sub">Hottest and longest-waiting first</div>
+          </div>
+        </div>
+        <ul class="attn" id="attention"></ul>
+      </div>
+    </section>
+
+    <!-- All enquiries -->
+    <section class="card section" aria-labelledby="enqTitle">
+      <div class="card-head">
+        <h2 id="enqTitle">All enquiries</h2>
+        <div class="segmented" role="group" aria-label="View">
+          <button type="button" data-view="board" aria-pressed="true">Board</button>
+          <button type="button" data-view="list">List</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input class="search" type="search" id="q" placeholder="Search name, email, subject…" aria-label="Search enquiries">
+        <select id="fTemp" aria-label="Temperature">
+          <option value="">All temperatures</option>
+          <option value="hot">Hot</option>
+          <option value="warm">Warm</option>
+          <option value="cold">Cold</option>
+        </select>
+        <select id="fStatus" aria-label="Status">
+          <option value="open">Open (not closed)</option>
+          <option value="">All statuses</option>
+          <option value="new">New</option>
+          <option value="contacted">Contacted</option>
+          <option value="quoted">Quoted</option>
+          <option value="won">Won</option>
+          <option value="lost">Lost</option>
+          <option value="spam">Spam</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="fAwaiting"> Needs a reply</label>
+      </div>
+      <div id="enquiries"></div>
+    </section>
+  </main>
+
+  <div class="scrim hidden" id="scrim"></div>
+  <aside class="drawer hidden" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dWho"></aside>
+
+  <dialog id="addDialog">
+    <form method="dialog" id="addForm">
+      <h2 style="margin-bottom:14px">Add an enquiry</h2>
+      <p class="muted" style="margin-top:-6px">For enquiries that came in by phone, in person, or anywhere else.</p>
+      <div class="dl">
+        <div class="field"><label for="aName">Name</label><input id="aName" name="fromName"></div>
+        <div class="field"><label for="aPhone">Phone</label><input id="aPhone" name="phone"></div>
+      </div>
+      <div class="field"><label for="aEmail">Email</label><input id="aEmail" name="fromEmail" type="email"></div>
+      <div class="field"><label for="aSubject">What's it about?</label><input id="aSubject" name="subject"></div>
+      <div class="field"><label for="aBody">Details</label><textarea id="aBody" name="body" placeholder="What they asked for, budget, timing…"></textarea></div>
+      <div class="err" id="aErr"></div>
+      <div class="foot">
+        <button type="button" value="cancel" id="aCancel">Cancel</button>
+        <button type="submit" class="primary">Add enquiry</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
