@@ -508,6 +508,26 @@ app.post('/api/inbound/:token', (req, res) => {
   res.status(r.action === 'skipped' ? 200 : 201).json(r);
 });
 
+// --- Cron wake-up --------------------------------------------------------------
+// For hosting that puts idle apps to sleep (e.g. cPanel "Setup Node.js App"):
+// a cron job opens /api/cron/<CRON_KEY> every few minutes to check inboxes and
+// send anything due. Disabled unless CRON_KEY is set.
+let cronRunning = false;
+app.get('/api/cron/:key', wrap(async (req, res) => {
+  const key = process.env.CRON_KEY;
+  if (!key || key.length < 16 || !sec.safeEqual(req.params.key, key)) return res.status(404).json({ error: 'Not found' });
+  if (cronRunning) return res.json({ ok: true, skipped: 'already running' });
+  cronRunning = true;
+  try {
+    const synced = await inbox.syncDue();
+    await automations.idle();
+    await automations.processDue();
+    res.json({ ok: true, synced, at: new Date().toISOString() });
+  } finally {
+    cronRunning = false;
+  }
+}));
+
 // --- Pages -------------------------------------------------------------------
 
 const page = (file) => (req, res) => res.sendFile(path.join(PUBLIC, file));
@@ -536,7 +556,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   res.status(500).json({ error: 'Something went wrong' });
 });
 
-if (require.main === module) {
+function start() {
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || '0.0.0.0'; // set HOST=127.0.0.1 behind nginx
   app.listen(port, host, () => {
@@ -546,4 +566,7 @@ if (require.main === module) {
   if (process.env.DISABLE_POLLER !== '1') inbox.startPoller();
 }
 
+if (require.main === module) start();
+
 module.exports = app;
+module.exports.start = start;

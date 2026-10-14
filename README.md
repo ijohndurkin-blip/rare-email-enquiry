@@ -96,11 +96,14 @@ Open http://localhost:3000/admin. The admin password is printed in the terminal;
 | `ANTHROPIC_API_KEY` | Optional. An alternative to entering the key in the admin area |
 | `APP_SECRET` | Optional. Secret for logins and encryption (otherwise generated into `data/secret.key`) |
 | `DATA_DIR` | Where the database and keys live (default `./data`) |
+| `CRON_KEY` | Optional. Turns on `/api/cron/<key>`, which checks inboxes and sends due emails, for hosting that sleeps idle apps |
+| `DISABLE_POLLER` | Set to `1` when a cron job does the inbox checks instead |
 
 ### Deploying
 
 **On your own server:**
-- **cPanel / WHM servers** (e.g. a 123-reg dedicated server): follow [deploy/DEPLOY-CPANEL.md](deploy/DEPLOY-CPANEL.md). It covers the subdomain, AutoSSL, the Apache proxy, allowing outgoing email, updates and backups.
+- **cPanel account without root or Terminal** (only "Setup Node.js App"): follow [deploy/DEPLOY-CPANEL-NODEJS-APP.md](deploy/DEPLOY-CPANEL-NODEJS-APP.md). It's all done by clicking, and uses a cron job to wake the app.
+- **cPanel / WHM servers with root access:** follow [deploy/DEPLOY-CPANEL.md](deploy/DEPLOY-CPANEL.md). It covers the subdomain, AutoSSL, the Apache proxy, allowing outgoing email, updates and backups.
 - **Plain Ubuntu/Debian or Plesk servers:** follow [deploy/DEPLOY-123REG.md](deploy/DEPLOY-123REG.md) (nginx and certbot).
 
 It runs as one Node process with a SQLite file, so any small server or container host works. Serverless hosts like Vercel don't fit, because the app needs a persistent disk and runs background inbox checks and follow-ups. With Docker:

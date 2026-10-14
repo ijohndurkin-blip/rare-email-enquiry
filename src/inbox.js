@@ -133,23 +133,33 @@ async function testConnection(inbox) {
   }
 }
 
-// Background poller: checks each enabled inbox on its own interval.
-function startPoller() {
-  const tick = () => {
-    const rows = db.prepare('SELECT id FROM businesses').all();
-    for (const { id } of rows) {
-      const b = getBusiness('id', id);
-      const { inbox } = b.settings;
-      if (!inbox.enabled || !inbox.host) continue;
-      const last = Date.parse(b.sync_state.lastSync || b.sync_state.lastErrorAt || 0) || 0;
-      if (Date.now() - last < Math.max(1, inbox.pollMinutes) * 60000) continue;
-      syncBusiness(id).then((r) => {
-        if (r.created || r.appended || r.replies) console.log(`[sync] ${b.slug}:`, r);
-      }).catch((err) => console.warn(`[sync] ${b.slug} failed: ${err.message}`));
+// Check every connected inbox that is due (each business has its own interval).
+async function syncDue() {
+  const results = [];
+  for (const { id } of db.prepare('SELECT id FROM businesses').all()) {
+    const b = getBusiness('id', id);
+    const { inbox } = b.settings;
+    if (!inbox.enabled || !inbox.host) continue;
+    const last = Date.parse(b.sync_state.lastSync || b.sync_state.lastErrorAt || 0) || 0;
+    if (Date.now() - last < Math.max(1, inbox.pollMinutes) * 60000 - 15000) continue;
+    try {
+      const r = await syncBusiness(id);
+      if (r.created || r.appended || r.replies) console.log(`[sync] ${b.slug}:`, r);
+      results.push({ business: b.slug, ...r });
+    } catch (err) {
+      console.warn(`[sync] ${b.slug} failed: ${err.message}`);
+      results.push({ business: b.slug, error: err.message });
     }
-  };
+  }
+  return results;
+}
+
+// Background poller for always-on servers. (On hosting that sleeps idle apps,
+// a cron job calling /api/cron/<key> does the same work — see server.js.)
+function startPoller() {
+  const tick = () => syncDue().catch((err) => console.warn(`[sync] ${err.message}`));
   setTimeout(tick, 5000);
   return setInterval(tick, 60000);
 }
 
-module.exports = { syncBusiness, testConnection, startPoller, stripQuoted };
+module.exports = { syncBusiness, syncDue, testConnection, startPoller, stripQuoted };

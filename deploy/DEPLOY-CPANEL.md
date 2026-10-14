@@ -7,6 +7,8 @@ How it fits together:
 - **The app** runs in the background as a system service on the server, on a private port (3000).
 - **Apache** (cPanel's web server) passes the subdomain's traffic to the app.
 
+> **No WHM/Terminal, just cPanel?** Use [DEPLOY-CPANEL-NODEJS-APP.md](DEPLOY-CPANEL-NODEJS-APP.md) instead.
+
 You need **root SSH access** (the same login as WHM). Commands below are run as root: `ssh root@YOUR-SERVER-IP`.
 
 > **Why not cPanel's "Setup Node.js App"?** It puts idle apps to sleep. This app has to stay awake to check inboxes and send follow-ups on time, so it runs as its own service instead.
