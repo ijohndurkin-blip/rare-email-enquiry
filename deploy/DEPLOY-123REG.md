@@ -2,7 +2,7 @@
 
 > **Server has cPanel/WHM?** Use [DEPLOY-CPANEL.md](DEPLOY-CPANEL.md) instead.
 
-This puts the app at **https://enquiries.raresquarelabs.co.uk**. (You can use any name you like instead of `enquiries`. If you do, change it everywhere below and in `nginx-enquiries.conf`.)
+This puts the app at **https://enquiries.raresquaredlabs.co.uk**. (You can use any name you like instead of `enquiries`. If you do, change it everywhere below and in `nginx-enquiries.conf`.)
 
 The steps assume **Ubuntu or Debian** with SSH root access. If your server runs **Plesk**, see the note at the end. Commands go in an SSH session on the server (`ssh root@YOUR-SERVER-IP`).
 
@@ -10,7 +10,7 @@ The steps assume **Ubuntu or Debian** with SSH root access. If your server runs 
 
 ## 1. Point the subdomain at the server (123-reg control panel)
 
-1. Log in to 123-reg → **Domains** → `raresquarelabs.co.uk` → **Manage DNS** (Advanced DNS).
+1. Log in to 123-reg → **Domains** → `raresquaredlabs.co.uk` → **Manage DNS** (Advanced DNS).
 2. Add a record:
    - **Type:** `A`
    - **Hostname:** `enquiries`
@@ -18,7 +18,7 @@ The steps assume **Ubuntu or Debian** with SSH root access. If your server runs 
    - **TTL:** default
 3. Save. It usually works within minutes but can take up to a few hours. To check, run this on any computer:
    ```bash
-   nslookup enquiries.raresquarelabs.co.uk
+   nslookup enquiries.raresquaredlabs.co.uk
    ```
    It should show your server's IP.
 
@@ -78,7 +78,7 @@ The service starts on boot and restarts itself if it ever stops. To watch the lo
 cp /opt/enquiries/deploy/nginx-enquiries.conf /etc/nginx/sites-available/enquiries
 ln -s /etc/nginx/sites-available/enquiries /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
-certbot --nginx -d enquiries.raresquarelabs.co.uk   # free certificate, renews automatically
+certbot --nginx -d enquiries.raresquaredlabs.co.uk   # free certificate, renews automatically
 ```
 
 If a firewall is on (`ufw status`), allow the web through it with `ufw allow 'Nginx Full'`. Leave port 3000 closed: the app only listens privately, behind nginx.
@@ -87,7 +87,7 @@ The app also needs to make **outgoing** connections to mail servers (ports 993, 
 
 ## 7. Open it
 
-Go to **https://enquiries.raresquarelabs.co.uk/admin**, sign in with your `ADMIN_PASSWORD`, add your AI key under **✨ Set up AI**, and create your first business.
+Go to **https://enquiries.raresquaredlabs.co.uk/admin**, sign in with your `ADMIN_PASSWORD`, add your AI key under **✨ Set up AI**, and create your first business.
 
 ---
 
@@ -115,7 +115,7 @@ Copy that folder off the server now and then (or use 123-reg's backup service).
 Plesk manages nginx itself, so skip step 6 and do this instead:
 
 1. Do steps 2–5 above (in step 2, leave out `nginx certbot python3-certbot-nginx`).
-2. In Plesk, go to **Websites & Domains → Add Subdomain** and add `enquiries` under `raresquarelabs.co.uk`.
+2. In Plesk, go to **Websites & Domains → Add Subdomain** and add `enquiries` under `raresquaredlabs.co.uk`.
 3. On the subdomain, open **SSL/TLS Certificates → Let's Encrypt** and issue a certificate (tick "redirect HTTP to HTTPS").
 4. On the subdomain, open **Apache & nginx Settings**:
    - untick **Proxy mode**
@@ -138,7 +138,7 @@ Don't use Plesk's own "Node.js" app feature for this. It can put idle apps to sl
 
 | Problem | Check |
 |---|---|
-| Subdomain doesn't load | `nslookup enquiries.raresquarelabs.co.uk` shows the server IP? `systemctl status nginx` |
+| Subdomain doesn't load | `nslookup enquiries.raresquaredlabs.co.uk` shows the server IP? `systemctl status nginx` |
 | "502 Bad Gateway" | The app isn't running: `systemctl status enquiries`, `journalctl -u enquiries -n 50` |
 | Can't connect a mailbox | Try the connect screen again; for Gmail use an app password. From the server: `openssl s_client -connect imap.gmail.com:993` should connect |
 | Alert email links point to the wrong address | Set `APP_URL` in `/etc/enquiries.env`, then `systemctl restart enquiries` |

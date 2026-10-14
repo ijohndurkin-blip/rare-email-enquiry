@@ -1,6 +1,6 @@
 # Deploying to a cPanel / WHM server (e.g. a 123-reg dedicated server)
 
-This puts the app at **https://enquiries.raresquarelabs.co.uk**, running alongside your existing cPanel sites without disturbing them.
+This puts the app at **https://enquiries.raresquaredlabs.co.uk**, running alongside your existing cPanel sites without disturbing them.
 
 How it fits together:
 - **cPanel** creates the subdomain and its free SSL certificate (AutoSSL), as for any site.
@@ -17,19 +17,19 @@ You need **root SSH access** (the same login as WHM). Commands below are run as 
 
 ## 1. Create the subdomain (cPanel)
 
-1. Log in to **cPanel** for the account that owns `raresquarelabs.co.uk`.
-2. Go to **Domains → Create A New Domain**. Enter `enquiries.raresquarelabs.co.uk`, untick "Share document root" if it's shown, and click **Submit**.
+1. Log in to **cPanel** for the account that owns `raresquaredlabs.co.uk`.
+2. Go to **Domains → Create A New Domain**. Enter `enquiries.raresquaredlabs.co.uk`, untick "Share document root" if it's shown, and click **Submit**.
 3. Note the **cPanel username** (top right of cPanel). You'll need it in step 6.
 
 **DNS:** where is the domain's DNS managed?
 - If the domain uses **your server's nameservers**, cPanel has already created the DNS record. Nothing more to do.
-- If it uses **123-reg's nameservers** (the usual case when the domain was bought at 123-reg), go to 123-reg → Domains → `raresquarelabs.co.uk` → **Manage DNS** and add an **A** record: hostname `enquiries`, value **your server's IP**.
+- If it uses **123-reg's nameservers** (the usual case when the domain was bought at 123-reg), go to 123-reg → Domains → `raresquaredlabs.co.uk` → **Manage DNS** and add an **A** record: hostname `enquiries`, value **your server's IP**.
 
-To check, run `nslookup enquiries.raresquarelabs.co.uk` on any computer. It should show your server's IP.
+To check, run `nslookup enquiries.raresquaredlabs.co.uk` on any computer. It should show your server's IP.
 
 ## 2. SSL certificate
 
-In cPanel → **Security → SSL/TLS Status**, tick `enquiries.raresquarelabs.co.uk` and click **Run AutoSSL**. (It also runs by itself within a few hours.) Then in **Domains**, switch on **Force HTTPS Redirect** for the subdomain.
+In cPanel → **Security → SSL/TLS Status**, tick `enquiries.raresquaredlabs.co.uk` and click **Run AutoSSL**. (It also runs by itself within a few hours.) Then in **Domains**, switch on **Force HTTPS Redirect** for the subdomain.
 
 ## 3. Install Node.js 22
 
@@ -80,7 +80,7 @@ Replace `CPANELUSER` with the cPanel username from step 1:
 
 ```bash
 U=CPANELUSER
-D=enquiries.raresquarelabs.co.uk
+D=enquiries.raresquaredlabs.co.uk
 for t in ssl std; do
   mkdir -p /etc/apache2/conf.d/userdata/$t/2_4/$U/$D
   cp /opt/enquiries/deploy/apache-proxy.conf /etc/apache2/conf.d/userdata/$t/2_4/$U/$D/proxy.conf
@@ -113,7 +113,7 @@ It should print a `220 smtp.gmail.com` greeting. If it hangs or is refused, send
 
 ## 8. Open it
 
-Go to **https://enquiries.raresquarelabs.co.uk/admin**, sign in with your `ADMIN_PASSWORD`, add your AI key under **✨ Set up AI**, and create your first business.
+Go to **https://enquiries.raresquaredlabs.co.uk/admin**, sign in with your `ADMIN_PASSWORD`, add your AI key under **✨ Set up AI**, and create your first business.
 
 ---
 

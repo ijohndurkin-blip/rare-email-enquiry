@@ -2,7 +2,7 @@
 
 This is for cPanel accounts **without** root, WHM or Terminal access: the usual set-up when one server hosts several domains, each with its own cPanel. Everything is done by clicking in cPanel.
 
-It puts the app at **https://enquiries.raresquarelabs.co.uk**.
+It puts the app at **https://enquiries.raresquaredlabs.co.uk**.
 
 How it works:
 - **Setup Node.js App** runs the app and connects it to the subdomain.
@@ -15,8 +15,8 @@ In the paths below, `d3wl4ur63d24` is your cPanel username, shown at the top rig
 
 ## 1. Subdomain and SSL
 
-1. **Domains → Create A New Domain:** `enquiries.raresquarelabs.co.uk` (you've done this already ✓).
-2. At 123-reg, `raresquarelabs.co.uk` → **Manage DNS** should have an **A** record `enquiries` pointing at this server's IP (shown as "Shared IP Address" on the cPanel home page).
+1. **Domains → Create A New Domain:** `enquiries.raresquaredlabs.co.uk` (you've done this already ✓).
+2. At 123-reg, `raresquaredlabs.co.uk` → **Manage DNS** should have an **A** record `enquiries` pointing at this server's IP (shown as "Shared IP Address" on the cPanel home page).
 3. **SSL/TLS Status:** tick the subdomain and click **Run AutoSSL**.
 
 ## 2. Make three secret values
@@ -46,7 +46,7 @@ Use a password manager or any password generator to create three long random val
 | Node.js version | the highest **22.x** (or newer) on the list. It must be **22.13 or newer** |
 | Application mode | Production |
 | Application root | `enquiries-app` |
-| Application URL | choose `enquiries.raresquarelabs.co.uk` and leave the path box empty |
+| Application URL | choose `enquiries.raresquaredlabs.co.uk` and leave the path box empty |
 | Application startup file | `app.js` |
 
 Under **Environment variables**, click **Add Variable** for each:
@@ -56,14 +56,14 @@ Under **Environment variables**, click **Add Variable** for each:
 | `ADMIN_PASSWORD` | from step 2 |
 | `APP_SECRET` | from step 2 |
 | `CRON_KEY` | from step 2 |
-| `APP_URL` | `https://enquiries.raresquarelabs.co.uk` |
+| `APP_URL` | `https://enquiries.raresquaredlabs.co.uk` |
 | `DATA_DIR` | `/home/d3wl4ur63d24/enquiries-data` |
 | `DISABLE_POLLER` | `1` |
 | `NODE_NO_WARNINGS` | `1` |
 
 Click **Create**. When the page reloads, scroll down and click **Run NPM Install**. Wait for it to finish, then click **Restart** at the top.
 
-Open **https://enquiries.raresquarelabs.co.uk/admin**. You should see the sign-in page ✓
+Open **https://enquiries.raresquaredlabs.co.uk/admin**. You should see the sign-in page ✓
 
 ## 5. The wake-up cron job
 
@@ -71,11 +71,11 @@ Open **https://enquiries.raresquarelabs.co.uk/admin**. You should see the sign-i
 - **Common settings:** "Once Per Five Minutes (*/5 * * * *)"
 - **Command:** (put your CRON_KEY at the end)
   ```
-  curl -fsS https://enquiries.raresquarelabs.co.uk/api/cron/YOUR_CRON_KEY > /dev/null
+  curl -fsS https://enquiries.raresquaredlabs.co.uk/api/cron/YOUR_CRON_KEY > /dev/null
   ```
 - Click **Add New Cron Job**.
 
-To check it: open `https://enquiries.raresquarelabs.co.uk/api/cron/YOUR_CRON_KEY` in your browser. It should show `{"ok":true,...}`.
+To check it: open `https://enquiries.raresquaredlabs.co.uk/api/cron/YOUR_CRON_KEY` in your browser. It should show `{"ok":true,...}`.
 
 ## 6. Set up and test sending
 
