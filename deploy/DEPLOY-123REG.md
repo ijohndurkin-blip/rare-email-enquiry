@@ -1,4 +1,6 @@
-# Deploying to a 123-reg dedicated server
+# Deploying to an Ubuntu/Debian or Plesk server
+
+> **Server has cPanel/WHM?** Use [DEPLOY-CPANEL.md](DEPLOY-CPANEL.md) instead.
 
 This puts the app at **https://enquiries.raresquarelabs.co.uk**. (You can use any name you like instead of `enquiries`. If you do, change it everywhere below and in `nginx-enquiries.conf`.)
 

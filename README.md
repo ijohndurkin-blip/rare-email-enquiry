@@ -99,7 +99,9 @@ Open http://localhost:3000/admin. The admin password is printed in the terminal;
 
 ### Deploying
 
-**On your own server (e.g. a 123-reg dedicated server):** follow [deploy/DEPLOY-123REG.md](deploy/DEPLOY-123REG.md). It covers the subdomain DNS record, Node.js, a systemd service, nginx with free HTTPS, updates and backups.
+**On your own server:**
+- **cPanel / WHM servers** (e.g. a 123-reg dedicated server): follow [deploy/DEPLOY-CPANEL.md](deploy/DEPLOY-CPANEL.md). It covers the subdomain, AutoSSL, the Apache proxy, allowing outgoing email, updates and backups.
+- **Plain Ubuntu/Debian or Plesk servers:** follow [deploy/DEPLOY-123REG.md](deploy/DEPLOY-123REG.md) (nginx and certbot).
 
 It runs as one Node process with a SQLite file, so any small server or container host works. Serverless hosts like Vercel don't fit, because the app needs a persistent disk and runs background inbox checks and follow-ups. With Docker:
 
