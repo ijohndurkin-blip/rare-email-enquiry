@@ -65,6 +65,10 @@ Click **Create**. When the page reloads, scroll down and click **Run NPM Install
 
 Open **https://enquiries.raresquaredlabs.co.uk/admin**. You should see the sign-in page ✓
 
+### If the subdomain shows "500 Internal Server Error"
+
+When the subdomain's folder is inside `public_html` and the main site is WordPress, WordPress's rules from `public_html/.htaccess` also apply to the subdomain and stop requests reaching the app. To fix it, open `public_html/enquiries.raresquaredlabs.co.uk/.htaccess` → **Edit** and paste the contents of [`htaccess-subdomain.txt`](htaccess-subdomain.txt) at the very bottom, below the CloudLinux lines. Then **Save Changes**.
+
 ## 5. The wake-up cron job
 
 **Advanced → Cron Jobs**:

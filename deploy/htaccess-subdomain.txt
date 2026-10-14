@@ -1,0 +1,8 @@
+
+# Keep the main site's WordPress rules away from this app
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteOptions IgnoreInherit
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
