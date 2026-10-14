@@ -10,6 +10,12 @@ process.env.ADMIN_PASSWORD = 'admin-pass';
 const { scoreEnquiry, temperatureFor, parseBudget } = require('../src/scoring');
 const { DEFAULT_SETTINGS } = require('../src/settings');
 const app = require('../src/server');
+const mailer = require('../src/mailer');
+const automations = require('../src/automations');
+const { db } = require('../src/db');
+
+const sent = [];
+mailer._setTransportFactory(() => ({ sendMail: async (m) => { sent.push(m); return {}; }, close() {} }));
 
 const rules = DEFAULT_SETTINGS.scoring;
 
@@ -95,6 +101,60 @@ test('end to end: admin creates business, webhook ingests, client sees it', asyn
     assert.equal(summary.byTemp.hot, 1);
     assert.equal(summary.totals.enquiries, 1);
     assert.equal(summary.series.length, 7);
+  } finally {
+    server.close();
+  }
+});
+
+test('approval flow: webhook enquiry → draft → edit & send from the dashboard', async () => {
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const json = (method, url, body, cookie) => fetch(base + url, {
+    method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  try {
+    const admin = (await json('POST', '/api/login', { password: 'admin-pass' })).headers.get('set-cookie').split(';')[0];
+    const created = await (await json('POST', '/api/admin/businesses', { name: 'Print Shop' }, admin)).json();
+    // Give it a sending mailbox and a template autopilot in draft mode.
+    const put = await json('PUT', `/api/admin/businesses/${created.id}`, {
+      settings: {
+        inbox: { email: 'hello@print.test', user: 'hello@print.test', password: 'pw', smtpHost: 'smtp.print.test', smtpPort: 465 },
+        info: { phone: '0113 000 0000' },
+        knowledge: { prices: [{ item: 'Business cards x500', price: '£45', notes: '' }] },
+        automations: { reply: { mode: 'draft', writer: 'template' } },
+      },
+    }, admin);
+    const saved = await put.json();
+    assert.equal(saved.settings.inbox.password, '********', 'password never sent back');
+    assert.equal(saved.settings.knowledge.prices[0].price, '£45');
+    assert.ok(db.prepare('SELECT settings FROM businesses WHERE id = ?').get(created.id).settings.includes('enc:'), 'stored encrypted');
+
+    await json('POST', `/api/inbound/${created.inboundToken}`, { from: 'Ann <ann@example.com>', subject: 'Cards', text: 'How much for 500 business cards?', messageId: '<a1@x>' });
+    await automations.idle();
+
+    const client = (await json('POST', '/api/login', { slug: created.slug, password: created.accessCode })).headers.get('set-cookie').split(';')[0];
+    const summary = await (await json('GET', `/api/b/${created.slug}/summary`, null, client)).json();
+    assert.equal(summary.totals.drafts, 1);
+    assert.equal(summary.canSend, true);
+
+    const [draft] = await (await json('GET', `/api/b/${created.slug}/queue`, null, client)).json();
+    assert.match(draft.body, /0113 000 0000/);
+
+    sent.length = 0;
+    const res = await json('POST', `/api/b/${created.slug}/outbox/${draft.id}/send`, { subject: draft.subject, body: 'Hi Ann, 500 cards are £45. Shall I go ahead?' }, client);
+    assert.equal(res.status, 200);
+    const e = await res.json();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].inReplyTo, '<a1@x>', 'threads with their email');
+    assert.equal(sent[0].from.address, 'hello@print.test');
+    assert.equal(e.awaitingReply, false);
+    assert.equal(e.status, 'contacted');
+    assert.equal(e.outbox.length, 0);
+    assert.equal(e.messages.at(-1).body, 'Hi Ann, 500 cards are £45. Shall I go ahead?');
+
+    // Another business can't touch this draft.
+    assert.equal((await json('POST', `/api/b/test-plumbing/outbox/${draft.id}/send`, {}, client)).status, 401);
   } finally {
     server.close();
   }

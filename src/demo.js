@@ -2,6 +2,7 @@
 // before its real inbox is connected.
 const { db, tx } = require('./db');
 const { ingest, recordResponse } = require('./enquiries');
+const { fill: fillTemplate } = require('./automations');
 
 const PEOPLE = [
   ['Sarah Mitchell', 'sarah.mitchell@gmail.com'], ['James Patel', 'james@pateldental.co.uk'],
@@ -20,24 +21,24 @@ const PEOPLE = [
 ];
 
 const HOT = [
-  ['Quote needed ASAP', 'Hi there,\n\nWe need a quote as soon as possible please. Our budget is around £{budget} and we would like to get started next week if you have availability. I am ready to go ahead once I have a price.\n\nYou can call me on 07700 900{n} any time.\n\nThanks,\n{first}'],
-  ['Booking for {date}', 'Hello,\n\nI would like to book you for {date}. Can you confirm availability and the cost? Happy to pay a deposit today to secure the date. Budget is £{budget}.\n\nBest number is 07700 900{n}.\n\n{first}'],
-  ['Urgent – can you help this week?', 'Hi,\n\nThis is urgent – our previous supplier let us down and we need someone this week. Could you send pricing over today? We have a budget of £{budget} approved and can proceed immediately.\n\nRegards,\n{first}\n{company}\nTel: 020 7946 0{n}'],
-  ['Ready to proceed', 'Hi,\n\nThanks for the info on your website. We have compared a few options and would like to proceed with you. Could you send an invoice for the deposit so we can lock in a start date? Ideally {date}.\n\nCheers,\n{first}'],
+  ['Quote needed ASAP', 'Hi there,\n\nWe need a quote as soon as possible please. Our budget is around £{budget} and we would like to get started next week if you have availability. I am ready to go ahead once I have a price.\n\nYou can call me on 07700 900{n} any time.\n\nThanks,\n{first}', 'Wants a quote ASAP, budget about £{budget}, hoping to start next week'],
+  ['Booking for {date}', 'Hello,\n\nI would like to book you for {date}. Can you confirm availability and the cost? Happy to pay a deposit today to secure the date. Budget is £{budget}.\n\nBest number is 07700 900{n}.\n\n{first}', 'Wants to book for {date} and pay a deposit today'],
+  ['Urgent – can you help this week?', 'Hi,\n\nThis is urgent – our previous supplier let us down and we need someone this week. Could you send pricing over today? We have a budget of £{budget} approved and can proceed immediately.\n\nRegards,\n{first}\n{company}\nTel: 020 7946 0{n}', 'Urgently needs help this week after a supplier let them down'],
+  ['Ready to proceed', 'Hi,\n\nThanks for the info on your website. We have compared a few options and would like to proceed with you. Could you send an invoice for the deposit so we can lock in a start date? Ideally {date}.\n\nCheers,\n{first}', 'Ready to go ahead — asking for a deposit invoice'],
 ];
 
 const WARM = [
-  ['Enquiry about your services', 'Hi,\n\nI came across your website and wondered what your pricing looks like for a project like ours. We are thinking of starting in the next couple of months. Could you send some details?\n\nThanks,\n{first}'],
-  ['Question about availability', 'Hello,\n\nDo you have any availability in the spring? We are planning ahead and would like a rough estimate if possible.\n\nKind regards,\n{first}'],
-  ['Price list?', 'Hi, could you send over a price list and let me know how much a typical job costs? Thanks, {first}'],
-  ['Recommendation from a friend', 'Hi,\n\nA friend recommended you. We are looking for someone for a project at our office and would love to understand your process and costs. Is there a good time for a quick call?\n\n{first}\n{company}'],
+  ['Enquiry about your services', 'Hi,\n\nI came across your website and wondered what your pricing looks like for a project like ours. We are thinking of starting in the next couple of months. Could you send some details?\n\nThanks,\n{first}', 'Asking about pricing for a project in the next few months'],
+  ['Question about availability', 'Hello,\n\nDo you have any availability in the spring? We are planning ahead and would like a rough estimate if possible.\n\nKind regards,\n{first}', 'Asking about spring availability and a rough estimate'],
+  ['Price list?', 'Hi, could you send over a price list and let me know how much a typical job costs? Thanks, {first}', 'Wants a price list and typical job cost'],
+  ['Recommendation from a friend', 'Hi,\n\nA friend recommended you. We are looking for someone for a project at our office and would love to understand your process and costs. Is there a good time for a quick call?\n\n{first}\n{company}', 'Referred by a friend — wants to discuss an office project'],
 ];
 
 const COLD = [
-  ['Just a question', 'Hi, just curious whether you cover our area? Not sure yet if we need anything, just browsing. {first}'],
-  ['Info', 'Hello, could you send a brochure? Maybe next year. Thanks'],
-  ['General enquiry', 'Hi, I am researching options for a possible project in the future, no rush at all. What kind of things do you do? {first}'],
-  ['Hello', 'Do you do weekends?'],
+  ['Just a question', 'Hi, just curious whether you cover our area? Not sure yet if we need anything, just browsing. {first}', 'Asking if you cover their area — just browsing'],
+  ['Info', 'Hello, could you send a brochure? Maybe next year. Thanks', 'Wants a brochure, maybe next year'],
+  ['General enquiry', 'Hi, I am researching options for a possible project in the future, no rush at all. What kind of things do you do? {first}', 'Early research for a possible future project'],
+  ['Hello', 'Do you do weekends?', 'Asking whether you work weekends'],
 ];
 
 const SPAM = [
@@ -69,7 +70,7 @@ function loadDemo(business, { clear = true } = {}) {
       const roll = r();
       const hotCut = i < 8 ? 0.45 : 0.3; // keep the most recent few lively for demos
       const kind = roll < hotCut ? 'hot' : roll < hotCut + 0.35 ? 'warm' : 'cold';
-      const [subject, body] = pick(kind === 'hot' ? HOT : kind === 'warm' ? WARM : COLD);
+      const [subject, body, summary] = pick(kind === 'hot' ? HOT : kind === 'warm' ? WARM : COLD);
       // Spread over the last ~60 days, with more recent ones weighted heavier.
       const ageH = i < 8 ? r() * 40 : Math.pow(r(), 1.2) * 60 * 24;
       const at = new Date(now - ageH * H);
@@ -82,9 +83,10 @@ function loadDemo(business, { clear = true } = {}) {
       const res = ingest(business, {
         fromEmail: email, fromName: name, subject: fill(subject, ctx), body: fill(body, ctx),
         messageId: `<demo-${business.id}-${i}@example.com>`, date: at, source: 'email',
-      });
+      }, { silent: true });
       if (res.action !== 'created') return;
-      created.push({ id: res.id, at, kind, ageH, email, ctx });
+      db.prepare('UPDATE enquiries SET ai_summary = ? WHERE id = ?').run(fill(summary, ctx), res.id);
+      created.push({ id: res.id, at, kind, ageH, email, ctx, name });
     });
 
     // A couple of follow-ups from keen customers.
@@ -93,11 +95,11 @@ function loadDemo(business, { clear = true } = {}) {
         fromEmail: c.email, subject: 'Re: following up',
         body: `Hi, just following up on my email – are you able to send that quote? Keen to get this booked in. ${c.ctx.first}`,
         messageId: `<demo-${business.id}-fu-${j}@example.com>`, date: new Date(c.at.getTime() + 26 * H),
-      });
+      }, { silent: true });
     });
 
     SPAM.forEach(([subject, body, email, name], i) => {
-      ingest(business, { fromEmail: email, fromName: name, subject, body, messageId: `<demo-${business.id}-spam-${i}@example.com>`, date: new Date(now - (3 + i * 9) * 86400000) });
+      ingest(business, { fromEmail: email, fromName: name, subject, body, messageId: `<demo-${business.id}-spam-${i}@example.com>`, date: new Date(now - (3 + i * 9) * 86400000) }, { silent: true });
     });
 
     // Responses and outcomes: older enquiries have mostly been handled.
@@ -109,7 +111,7 @@ function loadDemo(business, { clear = true } = {}) {
       recordResponse(business, {
         enquiryId: c.id, date: new Date(c.at.getTime() + delayH * H),
         body: `Hi ${c.ctx.first},\n\nThanks for getting in touch! Happy to help – I've attached some details and will follow up with a quote shortly.\n\nBest wishes`,
-      });
+      }, { silent: true });
       if (c.ageH > 96) {
         const o = r();
         const status = c.kind === 'hot' ? (o < 0.55 ? 'won' : o < 0.8 ? 'quoted' : 'lost')
@@ -118,6 +120,18 @@ function loadDemo(business, { clear = true } = {}) {
         const value = ['won', 'quoted'].includes(status) ? Math.round((800 + r() * 7000) / 50) * 50 : null;
         db.prepare('UPDATE enquiries SET status = ?, value = ? WHERE id = ?').run(status, value, c.id);
       }
+    });
+
+    // A few replies waiting for approval, as the autopilot would prepare them.
+    const a = business.settings.automations.reply;
+    const info = business.settings.info;
+    created.filter((c) => c.ageH < 30 && c.kind !== 'cold'
+      && !db.prepare("SELECT 1 FROM messages WHERE enquiry_id = ? AND direction = 'out'").get(c.id)).slice(0, 3).forEach((c) => {
+      const e = db.prepare('SELECT subject, phone FROM enquiries WHERE id = ?').get(c.id);
+      const vars = { first_name: c.ctx.first, business_name: business.name, business_phone: info.phone || 'us', signature: info.signature || `The ${business.name} team` };
+      vars.phone_ask = e.phone ? '' : fillTemplate(a.phoneAsk, vars);
+      db.prepare(`INSERT INTO outbox (business_id, enquiry_id, kind, status, auto, subject, body, written_by) VALUES (?, ?, 'reply', 'draft', 0, ?, ?, 'template')`)
+        .run(business.id, c.id, `Re: ${e.subject}`, fillTemplate(a.template, vars));
     });
   });
   return created.length;

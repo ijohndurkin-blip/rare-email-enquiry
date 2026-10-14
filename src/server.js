@@ -1,11 +1,18 @@
 const path = require('node:path');
 const express = require('express');
-const { db } = require('./db');
+const { db, getAppSetting, setAppSetting } = require('./db');
 const { DEFAULT_SETTINGS, merge } = require('./settings');
 const sec = require('./security');
 const enq = require('./enquiries');
 const inbox = require('./inbox');
 const { loadDemo } = require('./demo');
+const ai = require('./ai');
+const automations = require('./automations');
+const knowledge = require('./knowledge');
+const autoconfig = require('./autoconfig');
+const mailer = require('./mailer');
+
+automations.start();
 
 const app = express();
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -34,7 +41,11 @@ const isAdmin = (req) => session(req).admin === true;
 const canSee = (req, slug) => isAdmin(req) || session(req).business === slug;
 
 function requireAdmin(req, res, next) {
-  if (isAdmin(req)) return next();
+  if (isAdmin(req)) {
+    const origin = `${req.protocol}://${req.get('host')}`;
+    if (!process.env.APP_URL && getAppSetting('public_url') !== origin) setAppSetting('public_url', origin);
+    return next();
+  }
   return res.status(401).json({ error: 'Admin login required' });
 }
 
@@ -136,6 +147,12 @@ app.put('/api/admin/businesses/:id', requireAdmin, (req, res) => {
   const color = /^#[0-9a-f]{6}$/i.test(body.brandColor || '') ? body.brandColor : b.brand_color;
   const incoming = body.settings || {};
   const settings = merge(b.settings, incoming);
+  const str = (v, max) => String(v ?? '').trim().slice(0, max);
+  settings.knowledge.prices = settings.knowledge.prices
+    .filter((p) => p && typeof p === 'object' && (p.item || p.price))
+    .slice(0, 500)
+    .map((p) => ({ item: str(p.item, 200), price: str(p.price, 80), notes: str(p.notes, 300) }));
+  settings.automations.followUp.days = settings.automations.followUp.days.map(Number).filter((n) => n > 0 && n <= 90).slice(0, 5);
   // Keep the stored password unless a new one was typed.
   const pw = incoming.inbox?.password;
   settings.inbox.password = pw && pw !== '********' ? sec.encrypt(pw) : b.settings.inbox.password;
@@ -190,11 +207,203 @@ app.post('/api/admin/businesses/:id/sync', requireAdmin, wrap(async (req, res) =
   }
 }));
 
+// --- AI settings (install-wide) ---------------------------------------------------
+
+function aiView() {
+  const stored = getAppSetting('anthropic_key');
+  const key = ai.apiKey();
+  return {
+    configured: ai.isConfigured(),
+    source: stored ? 'saved' : key ? 'environment' : null,
+    keyHint: key ? `…${key.slice(-4)}` : '',
+    model: ai.model(),
+    models: ai.MODELS,
+  };
+}
+
+app.get('/api/admin/ai', requireAdmin, (req, res) => res.json(aiView()));
+
+app.put('/api/admin/ai', requireAdmin, wrap(async (req, res) => {
+  const { key, model, removeKey } = req.body || {};
+  const chosen = ai.MODELS.some((m) => m.id === model) ? model : ai.model();
+  if (removeKey) setAppSetting('anthropic_key', null);
+  if (key) {
+    try {
+      await ai.testKey(key.trim(), chosen);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    setAppSetting('anthropic_key', sec.encrypt(key.trim()));
+  }
+  setAppSetting('ai_model', chosen);
+  res.json(aiView());
+}));
+
+app.post('/api/admin/ai/test', requireAdmin, wrap(async (req, res) => {
+  try {
+    await ai.testKey(undefined, ai.model());
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}));
+
+// --- Connect a mailbox from just address + password ---------------------------------
+
+app.post('/api/admin/businesses/:id/connect-email', requireAdmin, wrap(async (req, res) => {
+  const b = enq.getBusiness('id', Number(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  const { email, password } = req.body || {};
+  const pw = password === '********' ? sec.decrypt(b.settings.inbox.password) : password;
+  const result = await autoconfig.discover(email, pw);
+  if (!result.ok) return res.status(400).json(result);
+  const ib = {
+    ...b.settings.inbox,
+    enabled: true,
+    email: String(email).trim().toLowerCase(),
+    provider: result.provider,
+    host: result.imap.host, port: result.imap.port, secure: result.imap.secure, user: result.imap.user,
+    password: sec.encrypt(pw),
+    smtpHost: result.smtp?.host || '', smtpPort: result.smtp?.port || 465, smtpSecure: result.smtp ? result.smtp.secure : true,
+    folder: 'INBOX',
+    sentFolder: result.sentFolder || '',
+    saveToSent: result.saveToSent,
+  };
+  const settings = { ...b.settings, inbox: ib };
+  if (!settings.contactEmail) settings.contactEmail = ib.email;
+  db.prepare("UPDATE businesses SET settings = ?, sync_state = '{}' WHERE id = ?").run(JSON.stringify(settings), b.id);
+  // Pull in recent mail straight away (quietly: no auto-replies to history).
+  inbox.syncBusiness(b.id).catch((err) => console.warn(`[sync] first sync for ${b.slug}: ${err.message}`));
+  res.json({ ...result, inbox: { ...ib, password: '********' } });
+}));
+
+// --- Learn about the business from its website ------------------------------------------
+
+const jobs = new Map(); // in-memory progress for long-running website reads
+app.post('/api/admin/businesses/:id/website/read', requireAdmin, (req, res) => {
+  const b = enq.getBusiness('id', Number(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  const { mode = 'site', website = '', pages = [], maxPages = 20 } = req.body || {};
+  const job = { id: sec.randomToken(8), status: 'running', log: [], result: null, error: null };
+  jobs.set(job.id, job);
+  setTimeout(() => jobs.delete(job.id), 3600000).unref();
+  (async () => {
+    try {
+      const read = await knowledge.readWebsite({ mode, website, pages, maxPages }, (m) => { job.log.push(m); });
+      knowledge.savePages(b.id, read.pages);
+      job.log.push(`Read ${read.pages.length} page${read.pages.length === 1 ? '' : 's'}`);
+      const fresh = enq.getBusiness('id', b.id);
+      const k = { ...fresh.settings.knowledge, crawlMode: mode, pages: Array.isArray(pages) ? pages : [], maxPages: Number(maxPages) || 20 };
+      const info = { ...fresh.settings.info, website: website || fresh.settings.info.website };
+      let suggestedPrices = [];
+      if (ai.isConfigured()) {
+        job.log.push('AI is writing the business profile…');
+        const p = await ai.buildProfile(fresh.name, read.pages);
+        k.profile = p.profile;
+        if (!k.faqs && p.faqs.length) k.faqs = p.faqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
+        if (!k.prices.length) k.prices = p.prices;
+        else suggestedPrices = p.prices;
+      }
+      k.builtAt = new Date().toISOString();
+      const settings = { ...fresh.settings, knowledge: k, info };
+      db.prepare('UPDATE businesses SET settings = ? WHERE id = ?').run(JSON.stringify(settings), b.id);
+      job.result = {
+        knowledge: { profile: k.profile, faqs: k.faqs, prices: k.prices },
+        pages: read.pages.map((p) => ({ url: p.url, title: p.title, chars: p.text.length })),
+        errors: read.errors.slice(0, 10),
+        aiUsed: ai.isConfigured(),
+        suggestedPrices,
+      };
+      job.status = 'done';
+    } catch (err) {
+      job.error = err.message;
+      job.status = 'error';
+    }
+  })();
+  res.status(202).json({ jobId: job.id });
+});
+
+app.get('/api/admin/jobs/:id', requireAdmin, (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
+app.get('/api/admin/businesses/:id/website/pages', requireAdmin, (req, res) => {
+  res.json(knowledge.listPages(Number(req.params.id)).map((p) => ({ url: p.url, title: p.title, chars: p.text.length, fetchedAt: p.fetchedAt })));
+});
+
+// Try the AI on a made-up enquiry, to check the knowledge and tone before going live.
+app.post('/api/admin/businesses/:id/test-reply', requireAdmin, wrap(async (req, res) => {
+  const b = enq.getBusiness('id', Number(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  if (!ai.isConfigured()) return res.status(400).json({ error: 'Add an AI key under AI settings first.' });
+  const { message = '', name = 'Alex', hasPhone = false } = req.body || {};
+  const thread = `Customer: ${name} <customer@example.com>${hasPhone ? ', phone 07700 900123' : ', no phone number given'}\n\n--- Message from customer\nSubject: Enquiry\n\n${message}`;
+  try {
+    const d = await ai.draftReply(b, thread, 'reply', { askPhone: b.settings.automations.reply.askPhone && !hasPhone });
+    res.json(d);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}));
+
 // --- Business dashboard API ------------------------------------------------------
 
 app.get('/api/b/:slug/summary', loadBusiness, (req, res) => {
   const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
-  res.json(enq.summary(req.business, days));
+  res.json({
+    ...enq.summary(req.business, days),
+    canSend: mailer.canSend(req.business),
+    aiEnabled: ai.isConfigured(),
+    replyMode: req.business.settings.automations.reply.mode,
+    followUpMode: req.business.settings.automations.followUp.mode,
+  });
+});
+
+app.get('/api/b/:slug/queue', loadBusiness, (req, res) => res.json(automations.queue(req.business)));
+
+const replyError = (res, err) => res.status(400).json({ error: err.message });
+
+app.post('/api/b/:slug/enquiries/:id/draft', loadBusiness, wrap(async (req, res) => {
+  try {
+    await automations.draftNow(req.business, Number(req.params.id), { instruction: String(req.body?.instruction || '').slice(0, 1000) });
+    res.json(enq.getEnquiry(req.business, Number(req.params.id)));
+  } catch (err) { replyError(res, err); }
+}));
+
+app.post('/api/b/:slug/enquiries/:id/send', loadBusiness, wrap(async (req, res) => {
+  try {
+    await automations.sendNew(req.business, Number(req.params.id), { subject: req.body?.subject, body: req.body?.body });
+    res.json(enq.getEnquiry(req.business, Number(req.params.id)));
+  } catch (err) { replyError(res, err); }
+}));
+
+function outboxOwner(req) {
+  return db.prepare('SELECT enquiry_id FROM outbox WHERE id = ? AND business_id = ?').get(Number(req.params.oid), req.business.id);
+}
+
+app.patch('/api/b/:slug/outbox/:oid', loadBusiness, (req, res) => {
+  const o = outboxOwner(req);
+  if (!o) return res.status(404).json({ error: 'Not found' });
+  automations.updateDraft(req.business, Number(req.params.oid), { subject: req.body?.subject, body: req.body?.body });
+  res.json(enq.getEnquiry(req.business, o.enquiry_id));
+});
+
+app.post('/api/b/:slug/outbox/:oid/send', loadBusiness, wrap(async (req, res) => {
+  const o = outboxOwner(req);
+  if (!o) return res.status(404).json({ error: 'Not found' });
+  try {
+    await automations.sendDraft(req.business, Number(req.params.oid), { subject: req.body?.subject, body: req.body?.body });
+    res.json(enq.getEnquiry(req.business, o.enquiry_id));
+  } catch (err) { replyError(res, err); }
+}));
+
+app.delete('/api/b/:slug/outbox/:oid', loadBusiness, (req, res) => {
+  const o = outboxOwner(req);
+  if (!o) return res.status(404).json({ error: 'Not found' });
+  automations.discard(req.business, Number(req.params.oid));
+  res.json(enq.getEnquiry(req.business, o.enquiry_id));
 });
 
 app.get('/api/b/:slug/enquiries', loadBusiness, (req, res) => {

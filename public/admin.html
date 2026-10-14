@@ -10,26 +10,54 @@
     .biz { display: flex; flex-direction: column; gap: 12px; }
     .biz .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .biz .stats { display: flex; gap: 8px; flex-wrap: wrap; }
-    .settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+    .settings { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: start; }
     .settings nav { position: sticky; top: 84px; display: grid; gap: 2px; }
-    .settings nav a { padding: 7px 10px; border-radius: 8px; color: var(--ink-2); }
+    .settings nav a { padding: 7px 10px; border-radius: 8px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
     .settings nav a:hover { background: var(--surface-2); text-decoration: none; }
+    .settings nav .tick { color: var(--good); }
     .settings section { scroll-margin-top: 80px; margin-bottom: 16px; }
     .settings section > h2 { margin-bottom: 4px; }
     .settings section > p.lead { color: var(--ink-2); margin: 0 0 16px; }
     .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
     .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; }
-    .savebar { position: sticky; bottom: 0; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(6px); padding: 12px 0; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--line); }
+    .savebar { position: sticky; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(6px); padding: 12px 0; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--line); }
     code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-    .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
     .result { margin-top: 10px; font-size: 13px; }
     .ok { color: var(--good); }
     .thresholds { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; margin: 6px 0 4px; }
+    .connected { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); }
+    .connected .big-tick { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good); flex: none; }
+    .connected .big-tick svg { width: 20px; height: 20px; }
+    .steps { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; color: var(--ink-2); display: grid; gap: 3px; }
+    .steps li::before { content: "• "; color: var(--muted); }
+    .help { border-radius: 10px; padding: 10px 12px; background: var(--warm-wash); color: var(--warm-ink); margin-top: 10px; font-size: 13px; }
+    .radio-cards { display: grid; gap: 8px; grid-template-columns: repeat(3, 1fr); margin-bottom: 14px; }
+    .radio-cards label { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; padding: 10px 12px; border-radius: 10px; box-shadow: 0 0 0 1px var(--line-strong); cursor: pointer; margin: 0; }
+    .radio-cards label:has(input:checked) { box-shadow: 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+    .radio-cards input { width: auto; margin-top: 3px; }
+    .radio-cards b { display: block; font-weight: 600; }
+    .radio-cards span { color: var(--ink-2); font-size: 12px; }
+    .prices { width: 100%; border-collapse: collapse; }
+    .prices th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 6px 6px; }
+    .prices td { padding: 3px; vertical-align: top; }
+    .prices td:last-child { width: 36px; }
+    .prices input { padding: 6px 8px; }
+    .auto-card { border-radius: 12px; box-shadow: 0 0 0 1px var(--line); padding: 16px; margin-bottom: 12px; }
+    .auto-card h3 { font-size: 14px; margin-bottom: 2px; }
+    .auto-card > p { color: var(--ink-2); margin: 0 0 12px; font-size: 13px; }
+    .auto-body { margin-top: 12px; }
+    .inline { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+    .inline label { font-weight: 400; display: flex; gap: 6px; align-items: center; margin: 0; }
+    .inline input[type=radio], .inline input[type=checkbox] { width: auto; }
+    .log { max-height: 160px; overflow-y: auto; font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; margin-top: 10px; }
+    .test-out { white-space: pre-wrap; background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+    .vars { font-size: 12px; color: var(--muted); }
+    .vars code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
     @media (max-width: 800px) {
       .settings { grid-template-columns: 1fr; }
       .settings nav { display: none; }
-      .two, .three { grid-template-columns: 1fr; }
+      .two, .three, .radio-cards { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -38,9 +66,10 @@
     <div class="topbar-inner">
       <div class="brand">
         <div class="brand-mark">E</div>
-        <div class="brand-name">Enquiry Dashboard <span class="muted" style="font-weight:400">· Admin</span></div>
+        <div class="brand-name">Enquiry Dashboard <span class="muted hide-sm" style="font-weight:400">· Admin</span></div>
       </div>
       <div class="spacer"></div>
+      <button type="button" id="aiBtn">✨ AI settings</button>
       <button type="button" class="primary" id="newBtn">+ New business</button>
       <button type="button" class="ghost" id="logout">Sign out</button>
     </div>
@@ -51,7 +80,7 @@
   <dialog id="newDialog">
     <form id="newForm">
       <h2 style="margin-bottom:14px">Set up a new business</h2>
-      <div class="field"><label for="nName">Business name</label><input id="nName" required placeholder="e.g. Harbour Kitchens"></div>
+      <div class="field"><label for="nName">Business name</label><input id="nName" required placeholder="e.g. Harbour Print Co"></div>
       <div class="field"><label for="nColor">Brand colour</label><input id="nColor" type="color" value="#2a78d6" style="height:38px;padding:3px"></div>
       <label class="chk field"><input type="checkbox" id="nDemo" checked> Fill with sample enquiries so I can show them the dashboard</label>
       <div class="err" id="nErr"></div>
@@ -69,6 +98,23 @@
       <div class="field"><label>Dashboard link</label><pre id="cUrl"></pre></div>
       <div class="field"><label>Access code</label><pre id="cCode" style="font-size:16px"></pre></div>
       <div class="foot"><button type="button" id="cCopy">Copy both</button><button class="primary">Done</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="aiDialog">
+    <form id="aiForm">
+      <h2 style="margin-bottom:6px">AI settings</h2>
+      <p class="ink-2" style="margin-top:0">One key powers every business: reading websites, summarising enquiries and writing reply drafts. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</p>
+      <div class="result" id="aiStatus" style="margin-bottom:12px"></div>
+      <div class="field"><label for="aiKey">Anthropic API key</label><input id="aiKey" type="password" autocomplete="off" placeholder="sk-ant-…"><div class="hint">Stored encrypted. Leave blank to keep the current key.</div></div>
+      <div class="field"><label for="aiModel">Model</label><select id="aiModel"></select></div>
+      <div class="err" id="aiErr"></div>
+      <div class="foot">
+        <button type="button" class="danger hidden" id="aiRemove">Remove key</button>
+        <span class="spacer"></span>
+        <button type="button" id="aiCancel">Close</button>
+        <button type="submit" class="primary" id="aiSave">Save &amp; test</button>
+      </div>
     </form>
   </dialog>
 

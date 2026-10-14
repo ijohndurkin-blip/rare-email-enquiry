@@ -30,6 +30,7 @@ async function load() {
   state.summary = summary;
   state.enquiries = enquiries;
   renderHeader();
+  renderApprovals();
   renderTemps();
   renderKpis();
   renderChart();
@@ -65,10 +66,10 @@ function renderTemps() {
   $('#tempTiles').innerHTML = TEMPS.map((t) => {
     const w = waiting(t);
     return `<button type="button" class="temp-tile t-${t}" data-temp="${t}" aria-pressed="${active === t}">
-      <div class="label">${ICONS[t]} ${TEMP_LABEL[t]}<span class="hide-sm">&nbsp;leads</span></div>
+      <div class="label">${ICONS[t]}<span>${TEMP_LABEL[t]}<span class="hide-sm"> leads</span></span></div>
       <div class="big num">${s.byTemp[t]}</div>
       <div class="desc">${TEMP_DESC[t]}</div>
-      ${w ? `<div class="flag">${ICONS.clock} ${w} waiting<span class="hide-sm">&nbsp;for a reply</span></div>` : `<div class="flag" style="background:transparent;padding-left:0;color:var(--muted)">${ICONS.check} Nobody waiting</div>`}
+      ${w ? `<div class="flag">${ICONS.clock}<span>${w} waiting<span class="hide-sm"> for a reply</span></span></div>` : `<div class="flag" style="background:transparent;padding-left:0;color:var(--muted)">${ICONS.check} Nobody waiting</div>`}
     </button>`;
   }).join('');
   $$('#tempTiles .temp-tile').forEach((b) => b.addEventListener('click', () => {
@@ -121,8 +122,9 @@ function renderKpis() {
     {
       label: 'Typical reply time',
       value: formatHours(rt),
-      foot: rt == null ? '<span class="muted">No replies yet</span>'
-        : `${rt <= target ? `<span class="delta-up">${ICONS.check} Within target</span>` : `<span class="status-critical">${ICONS.alert} Slower than ${formatHours(target)} target</span>`}`,
+      foot: (rt == null ? '<span class="muted">No replies yet</span>'
+        : `${rt <= target ? `<span class="delta-up">${ICONS.check} Within target</span>` : `<span class="status-critical">${ICONS.alert} Slower than ${formatHours(target)} target</span>`}`)
+        + (t.autoSent ? `<span class="muted"> · ${t.autoSent} sent automatically</span>` : ''),
     },
     {
       label: 'Won',
@@ -236,6 +238,13 @@ function renderChart() {
 // ---------------------------------------------------------------------------
 // Needs attention
 
+function timeUntil(iso) {
+  const h = (Date.parse(iso) - Date.now()) / 3600000;
+  if (h < 1) return 'soon';
+  if (h < 24) return `in ${Math.round(h)}h`;
+  return `in ${Math.round(h / 24)}d`;
+}
+
 function waitingPill(e) {
   if (!e.awaitingReply) return '';
   return e.overdue
@@ -249,11 +258,11 @@ function renderAttention() {
       <span class="dot t-${e.temperature}" title="${TEMP_LABEL[e.temperature]}"></span>
       <span class="body">
         <div class="who">${esc(e.fromName || e.fromEmail)}</div>
-        <div class="what">${esc(e.subject)}</div>
+        <div class="what">${esc(e.aiSummary || e.subject)}</div>
       </span>
       <span class="meta">
         <div>${tempPill(e.temperature)}</div>
-        <div style="margin-top:4px" class="${e.overdue ? 'status-critical' : 'muted'}">${formatHours(e.waitingHours)} waiting</div>
+        <div style="margin-top:4px" class="${e.overdue ? 'status-critical' : 'muted'}">${e.draftCount ? '<span class="draft-dot">✉ Reply ready</span>' : `${formatHours(e.waitingHours)} waiting`}</div>
       </span>
     </button></li>`).join('')
     : `<li class="empty">${ICONS.check} You're all caught up — nobody important is waiting.</li>`;
@@ -273,7 +282,7 @@ function filtered() {
     if (status === 'open' && !['new', 'contacted', 'quoted'].includes(e.status)) return false;
     if (status && status !== 'open' && e.status !== status) return false;
     if (awaiting && !e.awaitingReply) return false;
-    if (q && ![e.fromName, e.fromEmail, e.subject, e.preview, e.phone].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+    if (q && ![e.fromName, e.fromEmail, e.subject, e.preview, e.phone, e.aiSummary].some((v) => String(v || '').toLowerCase().includes(q))) return false;
     return true;
   });
 }
@@ -285,10 +294,11 @@ function card(e) {
       <span class="ecard-time">${timeAgo(e.lastInboundAt)}</span>
     </div>
     <div class="ecard-subj">${esc(e.subject)}</div>
-    <div class="ecard-prev">${esc(e.preview || '')}</div>
+    <div class="ecard-prev">${e.aiSummary ? `<span class="ai-sum">${esc(e.aiSummary)}</span>` : esc(e.preview || '')}</div>
     <div class="ecard-foot">
       <span class="pill status ${e.status}">${STATUS_LABEL[e.status]}</span>
-      ${waitingPill(e)}
+      ${e.draftCount ? '<span class="pill draft">✉ Reply ready</span>' : waitingPill(e)}
+      ${!e.draftCount && e.nextScheduledAt ? `<span class="pill waiting" title="Follow-up scheduled">${ICONS.clock} Follow-up ${timeUntil(e.nextScheduledAt)}</span>` : ''}
       <span class="score" title="Lead score out of 100">${e.score}</span>
     </div>
   </div>`;
@@ -317,7 +327,7 @@ function renderEnquiries() {
       <tbody>${sorted.map((e) => `<tr tabindex="0" data-id="${e.id}">
         <td>${tempPill(e.temperature)}</td>
         <td><div style="font-weight:600">${esc(e.fromName || '')}</div><div class="muted">${esc(e.fromEmail)}</div></td>
-        <td class="subj">${esc(e.subject)}</td>
+        <td class="subj">${esc(e.aiSummary || e.subject)}</td>
         <td><span class="pill status ${e.status}">${STATUS_LABEL[e.status]}</span></td>
         <td>${waitingPill(e) || `<span class="muted">${e.lastResponseAt ? 'Replied' : '—'}</span>`}</td>
         <td class="muted" style="white-space:nowrap">${timeAgo(e.receivedAt)}</td>
@@ -348,20 +358,66 @@ async function openDrawer(id) {
 
 function closeDrawer() {
   state.openId = null;
+  state.review = null;
   $('#scrim').classList.add('hidden');
   $('#drawer').classList.add('hidden');
   lastFocus?.focus?.();
 }
 
+function mailtoLink(e, subject, body) {
+  return `mailto:${encodeURIComponent(e.fromEmail)}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
+}
+
+function whenLabel(iso) {
+  const d = new Date(iso);
+  const mins = (d - Date.now()) / 60000;
+  if (mins < 1) return 'in a moment';
+  if (mins < 60) return `in ${Math.round(mins)} min`;
+  return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+const WRITTEN_BY = { ai: 'Written by AI', template: 'From your template', manual: 'Written by you' };
+
+function composerHtml(e, o) {
+  const s = state.summary || {};
+  const label = o.kind === 'followup' ? `Follow-up ${o.step || ''}`.trim() : 'Reply';
+  const realEmail = !e.fromEmail.endsWith('@manual.local');
+  const canSend = s.canSend && realEmail;
+  return `<div class="composer" data-oid="${o.id ?? ''}">
+    <div class="composer-head">
+      <span><b>${o.id ? `${label} ready to check` : 'Your reply'}</b>${o.writtenBy ? ` <span class="muted">· ${WRITTEN_BY[o.writtenBy] || ''}</span>` : ''}</span>
+      ${o.status === 'failed' ? `<span class="status-critical">${ICONS.alert} Not sent</span>` : ''}
+    </div>
+    ${o.error ? `<div class="note">${esc(o.error)}</div>` : ''}
+    <input class="c-subject" value="${esc(o.subject || '')}" aria-label="Subject">
+    <textarea class="c-body" rows="10" aria-label="Email">${esc(o.body || '')}</textarea>
+    ${s.aiEnabled ? `<div class="rewrite">
+      <input class="c-instr" placeholder="Ask AI to change it — e.g. “shorter”, “offer a 10% discount”, “say we can do Friday”" aria-label="Instruction for AI">
+      <button type="button" data-act="rewrite">✨ Rewrite</button>
+    </div>` : ''}
+    <div class="c-actions">
+      ${canSend ? '<button type="button" class="primary" data-act="send">Send</button>' : `<a class="btn primary" data-act="mailto" href="#" style="background:var(--accent);color:#fff;border-color:var(--accent)">Open in email app</a>`}
+      <button type="button" data-act="copy">Copy text</button>
+      <span class="spacer"></span>
+      ${o.id ? '<button type="button" class="ghost danger" data-act="discard">Discard</button>' : '<button type="button" class="ghost" data-act="cancel-new">Cancel</button>'}
+    </div>
+    ${!canSend && realEmail ? '<div class="muted" style="font-size:12px;margin-top:6px">Sending from the dashboard needs the mailbox connected. After sending from your email app, press “Mark as replied”.</div>' : ''}
+  </div>`;
+}
+
 function renderDrawer(e) {
   const cur = state.summary?.currency || '£';
-  const firstIn = e.messages.find((m) => m.direction === 'in');
-  const reSubject = /^re:/i.test(e.subject || '') ? e.subject : `Re: ${e.subject || ''}`;
-  const quote = firstIn ? `\n\n\n> ${firstIn.body.split('\n').join('\n> ')}` : '';
-  const mailto = `mailto:${encodeURIComponent(e.fromEmail)}?subject=${encodeURIComponent(reSubject)}&body=${encodeURIComponent(`Hi ${(e.fromName || '').split(' ')[0] || 'there'},\n\n${quote}`)}`;
   const realEmail = !e.fromEmail.endsWith('@manual.local');
+  const s = state.summary || {};
+  const drafts = e.outbox.filter((o) => o.status === 'draft' || o.status === 'failed');
+  const scheduled = e.outbox.filter((o) => o.status === 'scheduled');
+  const d = e.aiDetails || {};
+  const facts = [['Wants', d.wants], ['When', d.deadline], ['Budget', d.budget]].filter(([, v]) => v);
+  const reviewNav = state.review ? `<div class="review-nav"><span>Checking replies · ${state.review.index + 1} of ${state.review.ids.length}</span>
+      <span><button type="button" class="ghost" id="rvPrev" ${state.review.index === 0 ? 'disabled' : ''}>← Back</button><button type="button" class="ghost" id="rvNext">${state.review.index + 1 < state.review.ids.length ? 'Skip →' : 'Done'}</button></span></div>` : '';
 
   $('#drawer').innerHTML = `
+    ${reviewNav}
     <div class="drawer-head" style="border-top:4px solid var(--${e.temperature})">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div style="display:flex;gap:6px;flex-wrap:wrap">${tempPill(e.temperature)}<span class="pill status ${e.status}">${STATUS_LABEL[e.status]}</span>${waitingPill(e)}</div>
@@ -370,36 +426,50 @@ function renderDrawer(e) {
       <div class="who" id="dWho" style="margin-top:10px">${esc(e.fromName || e.fromEmail)}</div>
       <div class="contact">
         ${realEmail ? `<a href="mailto:${esc(e.fromEmail)}">${esc(e.fromEmail)}</a>` : ''}
-        ${e.phone ? `<a href="tel:${esc(e.phone.replace(/[^\d+]/g, ''))}">${esc(e.phone)}</a>` : ''}
+        ${e.phone ? `<a href="tel:${esc(e.phone.replace(/[^\d+]/g, ''))}">${esc(e.phone)}</a>` : '<span class="muted">No phone number</span>'}
       </div>
+      ${e.aiSummary ? `<div class="summary-box"><div class="sum">${esc(e.aiSummary)}</div>
+        ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<span><b>${k}:</b> ${esc(v)}</span>`).join('')}</div>` : ''}
+        ${d.questions?.length ? `<div class="facts"><span><b>Asked:</b> ${d.questions.map(esc).join(' · ')}</span></div>` : ''}</div>` : ''}
       <div class="actions">
-        ${realEmail ? `<a class="btn primary" href="${esc(mailto)}" style="background:var(--accent);color:#fff;border-color:var(--accent)">Reply by email</a>` : ''}
+        ${!drafts.length && realEmail ? `${s.aiEnabled ? '<button type="button" class="primary" id="dDraft">✨ Write a reply</button>' : ''}<button type="button" id="dWrite" ${s.aiEnabled ? '' : 'class="primary"'}>Write my own</button>` : ''}
         ${e.phone ? `<a class="btn" href="tel:${esc(e.phone.replace(/[^\d+]/g, ''))}">Call</a>` : ''}
         ${e.awaitingReply ? '<button type="button" id="dReplied">✓ Mark as replied</button>' : ''}
       </div>
     </div>
     <div class="drawer-body">
-      <div class="dl">
-        <div class="field"><label for="dStatus">Stage</label>
-          <select id="dStatus">${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}" ${k === e.status ? 'selected' : ''}>${v}</option>`).join('')}</select>
-        </div>
-        <div class="field"><label for="dTemp">Lead temperature</label>
-          <select id="dTemp">
-            <option value="">Automatic</option>
-            ${TEMPS.map((t) => `<option value="${t}" ${e.tempOverridden && e.temperature === t ? 'selected' : ''}>${TEMP_LABEL[t]} (set by hand)</option>`).join('')}
-          </select>
-        </div>
-        <div class="field"><label for="dValue">Deal value (${esc(cur)})</label>
-          <input id="dValue" type="number" min="0" step="any" value="${e.value ?? ''}" placeholder="${e.budget ? `Budget mentioned: ${e.budget}` : 'e.g. 2500'}">
-        </div>
-        <div class="field"><label>Received</label><div class="ink-2" style="padding-top:6px">${formatDateTime(e.receivedAt)}</div></div>
+      <div id="composers">${drafts.map((o) => composerHtml(e, o)).join('')}</div>
+
+      ${scheduled.length ? `<div class="block"><h3>Coming up</h3>${scheduled.map((o) => `<div class="sched">
+        <span>${ICONS.clock} <b>${o.kind === 'followup' ? `Follow-up ${o.step}` : 'Reply'}</b> ${o.auto ? 'sends automatically' : 'will be drafted for you to check'} ${whenLabel(o.dueAt)}</span>
+        <button type="button" class="ghost" data-cancel="${o.id}">Cancel</button>
+      </div>`).join('')}<div class="muted" style="font-size:12px">Follow-ups stop by themselves if they reply.</div></div>` : ''}
+
+      <div class="block">
+        <h3>Conversation (${e.messages.length})</h3>
+        ${e.messages.map((m) => `<div class="msg ${m.direction}">
+          <div class="msg-meta"><span>${m.direction === 'in' ? esc(e.fromName || e.fromEmail) : m.auto ? 'Sent automatically' : 'You replied'}</span><span>${formatDateTime(m.sentAt)}</span></div>
+          ${m.subject ? `<div style="font-weight:600;margin-bottom:4px">${esc(m.subject)}</div>` : ''}
+          <div class="msg-body">${esc(m.body)}</div>
+        </div>`).join('')}
       </div>
 
       <div class="block">
-        <h3>Why it's ${TEMP_LABEL[e.temperature].toLowerCase()} — score ${e.score}/100${e.tempOverridden ? ' (temperature set by hand)' : ''}</h3>
-        <ul class="why">
-          ${e.signals.map((s) => `<li><span>${esc(s.label)}</span><span class="pts ${s.points > 0 ? 'pos' : s.points < 0 ? 'neg' : ''}">${s.points > 0 ? '+' : ''}${s.points}</span></li>`).join('')}
-        </ul>
+        <div class="dl">
+          <div class="field"><label for="dStatus">Stage</label>
+            <select id="dStatus">${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}" ${k === e.status ? 'selected' : ''}>${v}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label for="dTemp">Lead temperature</label>
+            <select id="dTemp">
+              <option value="">Automatic</option>
+              ${TEMPS.map((t) => `<option value="${t}" ${e.tempOverridden && e.temperature === t ? 'selected' : ''}>${TEMP_LABEL[t]} (set by hand)</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label for="dValue">Deal value (${esc(cur)})</label>
+            <input id="dValue" type="number" min="0" step="any" value="${e.value ?? ''}" placeholder="${e.budget ? `Budget mentioned: ${e.budget}` : 'e.g. 2500'}">
+          </div>
+          <div class="field"><label>Received</label><div class="ink-2" style="padding-top:6px">${formatDateTime(e.receivedAt)}</div></div>
+        </div>
       </div>
 
       <div class="block">
@@ -408,27 +478,137 @@ function renderDrawer(e) {
       </div>
 
       <div class="block">
-        <h3>Conversation (${e.messages.length})</h3>
-        ${e.messages.map((m) => `<div class="msg ${m.direction}">
-          <div class="msg-meta"><span>${m.direction === 'in' ? esc(e.fromName || e.fromEmail) : 'You replied'}</span><span>${formatDateTime(m.sentAt)}</span></div>
-          ${m.subject ? `<div style="font-weight:600;margin-bottom:4px">${esc(m.subject)}</div>` : ''}
-          <div class="msg-body">${esc(m.body)}</div>
-        </div>`).join('')}
+        <h3>Why it's ${TEMP_LABEL[e.temperature].toLowerCase()}${e.tempSource === 'manual' ? ' (set by hand)' : ''}</h3>
+        ${e.tempSource === 'ai' && e.aiReason ? `<p class="ink-2" style="margin:0 0 8px">${esc(e.aiReason)}</p>` : ''}
+        <details ${e.tempSource === 'rules' ? 'open' : ''}><summary class="muted" style="cursor:pointer;font-size:12px">Score ${e.score}/100 from signals in the email</summary>
+        <ul class="why">
+          ${e.signals.map((x) => `<li><span>${esc(x.label)}</span><span class="pts ${x.points > 0 ? 'pos' : x.points < 0 ? 'neg' : ''}">${x.points > 0 ? '+' : ''}${x.points}</span></li>`).join('')}
+        </ul></details>
       </div>
     </div>`;
 
-  $('#dClose').addEventListener('click', closeDrawer);
-  const save = async (patch, msg) => {
-    const updated = await call(`${base}/enquiries/${e.id}`, { method: 'PATCH', body: patch });
+  wireDrawer(e);
+}
+
+function wireDrawer(e) {
+  const refresh = (updated, msg) => {
     if (msg) toast(msg);
-    renderDrawer(updated);
+    if (updated) renderDrawer(updated);
     load();
   };
+  const save = async (patch, msg) => refresh(await call(`${base}/enquiries/${e.id}`, { method: 'PATCH', body: patch }), msg);
+  $('#dClose').addEventListener('click', closeDrawer);
   $('#dStatus').addEventListener('change', (ev) => save({ status: ev.target.value }, `Moved to ${STATUS_LABEL[ev.target.value]}`));
   $('#dTemp').addEventListener('change', (ev) => save({ tempOverride: ev.target.value || null }, 'Temperature updated'));
   $('#dValue').addEventListener('change', (ev) => save({ value: ev.target.value }, 'Value saved'));
   $('#dNotes').addEventListener('blur', (ev) => { if (ev.target.value !== e.notes) save({ notes: ev.target.value }, 'Notes saved'); });
   $('#dReplied')?.addEventListener('click', () => save({ markReplied: true }, 'Marked as replied'));
+  $('#rvNext')?.addEventListener('click', () => reviewStep(1));
+  $('#rvPrev')?.addEventListener('click', () => reviewStep(-1));
+
+  $('#dDraft')?.addEventListener('click', async (ev) => {
+    ev.target.disabled = true; ev.target.textContent = 'Writing…';
+    try { refresh(await call(`${base}/enquiries/${e.id}/draft`, { method: 'POST', body: {} })); } catch (err) { toast(err.message); ev.target.disabled = false; ev.target.textContent = '✨ Write a reply'; }
+  });
+  $('#dWrite')?.addEventListener('click', () => {
+    const first = (e.fromName || '').split(' ')[0];
+    $('#composers').innerHTML = composerHtml(e, { subject: /^re:/i.test(e.subject || '') ? e.subject : `Re: ${e.subject || ''}`, body: `Hi ${first || 'there'},\n\n` });
+    wireComposers(e, refresh);
+    $('#composers .c-body').focus();
+  });
+  $$('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
+    refresh(await call(`${base}/outbox/${b.dataset.cancel}`, { method: 'DELETE' }), 'Cancelled');
+  }));
+  wireComposers(e, refresh);
+}
+
+function wireComposers(e, refresh) {
+  $$('#composers .composer').forEach((c) => {
+    const oid = c.dataset.oid;
+    const subject = () => $('.c-subject', c).value;
+    const body = () => $('.c-body', c).value;
+    const busy = (btn, text) => { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = text; };
+    const idle = (btn) => { btn.disabled = false; btn.textContent = btn.dataset.label; };
+    // Keep edits to a saved draft.
+    if (oid) {
+      [$('.c-subject', c), $('.c-body', c)].forEach((el) => el.addEventListener('change', () => {
+        call(`${base}/outbox/${oid}`, { method: 'PATCH', body: { subject: subject(), body: body() } }).catch(() => {});
+      }));
+    }
+    c.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      if (act === 'copy') {
+        navigator.clipboard?.writeText(body());
+        toast('Copied');
+      } else if (act === 'mailto') {
+        ev.preventDefault();
+        location.href = mailtoLink(e, subject(), body());
+      } else if (act === 'cancel-new') {
+        renderDrawer(e);
+      } else if (act === 'discard') {
+        refresh(await call(`${base}/outbox/${oid}`, { method: 'DELETE' }), 'Draft discarded');
+      } else if (act === 'rewrite') {
+        const instruction = $('.c-instr', c).value.trim();
+        busy(btn, 'Rewriting…');
+        try {
+          if (oid) await call(`${base}/outbox/${oid}`, { method: 'PATCH', body: { subject: subject(), body: body() } });
+          refresh(await call(`${base}/enquiries/${e.id}/draft`, { method: 'POST', body: { instruction: instruction || 'Improve this draft.' } }));
+        } catch (err) { toast(err.message); idle(btn); }
+      } else if (act === 'send') {
+        if (!body().trim()) return toast('The email is empty');
+        busy(btn, 'Sending…');
+        try {
+          const updated = oid
+            ? await call(`${base}/outbox/${oid}/send`, { method: 'POST', body: { subject: subject(), body: body() } })
+            : await call(`${base}/enquiries/${e.id}/send`, { method: 'POST', body: { subject: subject(), body: body() } });
+          toast('Sent ✓');
+          if (state.review) { load(); return reviewStep(1, true); }
+          refresh(updated);
+        } catch (err) { toast(err.message); idle(btn); }
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Approval queue: step through drafted replies one after another
+
+async function startReview() {
+  const queue = await call(`${base}/queue`);
+  const ids = [...new Set(queue.map((q) => q.enquiryId))];
+  if (!ids.length) return toast('Nothing waiting — all caught up');
+  state.review = { ids, index: 0 };
+  openDrawer(ids[0]);
+}
+
+function reviewStep(dir, afterSend = false) {
+  const r = state.review;
+  if (!r) return;
+  if (afterSend) r.ids.splice(r.index, 1);
+  else r.index += dir;
+  if (afterSend && r.index >= r.ids.length) r.index = r.ids.length - 1;
+  if (r.index < 0 || r.index >= r.ids.length || !r.ids.length) {
+    state.review = null;
+    closeDrawer();
+    toast('All replies checked');
+    return;
+  }
+  openDrawer(r.ids[r.index]);
+}
+
+function renderApprovals() {
+  const s = state.summary;
+  const n = s.totals.drafts;
+  const el = $('#approvals');
+  if (!n) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="approve-icon">✉</div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600">${n} ${n === 1 ? 'reply is' : 'replies are'} ready for you to check</div>
+    <div class="ink-2" style="font-size:13px">${s.aiEnabled ? 'Written using your website and prices.' : 'Prepared from your template.'} Read, tweak if needed, and send.</div></div>
+    <button type="button" class="primary" id="reviewBtn">Check &amp; send</button>`;
+  $('#reviewBtn').addEventListener('click', startReview);
 }
 
 // ---------------------------------------------------------------------------
@@ -471,5 +651,11 @@ let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => state.summary && renderChart(), 150); });
 
 api('/api/me').then((me) => { if (me.admin) $('#adminLink').classList.remove('hidden'); });
-load();
+// Links like /b/slug#enquiry-42 (used in alert emails) open that enquiry.
+const openFromHash = () => {
+  const m = location.hash.match(/^#enquiry-(\d+)/);
+  if (m) openDrawer(Number(m[1]));
+};
+window.addEventListener('hashchange', openFromHash);
+load().then(openFromHash);
 setInterval(() => { if (!state.openId && document.visibilityState === 'visible') load(); }, 60000);

@@ -2,8 +2,54 @@
 // and anything saved from the admin screen is merged on top.
 const DEFAULT_SETTINGS = {
   contactEmail: '',
-  replySignature: '',
   responseTargetHours: 4,
+  // Details used when writing replies.
+  info: {
+    phone: '',
+    website: '',
+    hours: '',
+    signature: '',
+    tone: 'friendly', // friendly | professional | casual
+    timezone: 'Europe/London',
+    extraInstructions: '',
+  },
+  // What the business does, learned from its website and edited by you.
+  knowledge: {
+    crawlMode: 'site', // home | site | pages
+    pages: [],
+    maxPages: 20,
+    profile: '',
+    faqs: '',
+    prices: [], // [{ item, price, notes }]
+    builtAt: '',
+  },
+  automations: {
+    ai: { enabled: true }, // summaries, junk filtering and temperature by AI (when a key is set)
+    reply: {
+      mode: 'draft', // off | draft | auto
+      who: 'all', // all | no-phone
+      writer: 'ai', // ai | template
+      askPhone: true,
+      phoneAsk: "If you can reply with the best number to reach you on, or give us a call on {business_phone}, we can get this moving for you quickly.",
+      template: "Hi {first_name},\n\nThanks for getting in touch with {business_name} — we've got your enquiry and will come back to you shortly.\n\n{phone_ask}\n\n{signature}",
+      delayMinutes: 2,
+    },
+    followUp: {
+      mode: 'off', // off | draft | auto
+      days: [3, 7],
+      writer: 'ai',
+      sendAt: '09:30',
+      templates: [
+        "Hi {first_name},\n\nJust checking you got our last email about your enquiry. Is there anything else you need from us to get started?\n\n{phone_ask}\n\n{signature}",
+        "Hi {first_name},\n\nI didn't want your enquiry to slip through the cracks. If you're still interested, just reply to this email and we'll pick it up from there.\n\n{signature}",
+      ],
+    },
+    alerts: {
+      enabled: false,
+      email: '',
+      onlyHot: true,
+    },
+  },
   scoring: {
     hotThreshold: 60,
     warmThreshold: 30,
@@ -41,13 +87,19 @@ const DEFAULT_SETTINGS = {
   },
   inbox: {
     enabled: false,
-    host: '',
+    email: '',
+    provider: '',
+    host: '', // IMAP (receiving)
     port: 993,
     secure: true,
     user: '',
-    password: '', // stored encrypted — see crypto.js
+    password: '', // stored encrypted — see security.js
+    smtpHost: '', // SMTP (sending)
+    smtpPort: 465,
+    smtpSecure: true,
     folder: 'INBOX',
     sentFolder: '',
+    saveToSent: false, // copy sent mail into the Sent folder (providers that don't do it themselves)
     pollMinutes: 5,
   },
 };
@@ -61,7 +113,12 @@ function merge(base, over) {
     if (!(k in base)) continue; // ignore unknown keys
     if (isObj(base[k])) out[k] = merge(base[k], v);
     else if (Array.isArray(base[k])) {
-      out[k] = Array.isArray(v) ? v.map((s) => String(s).trim()).filter(Boolean) : base[k];
+      if (!Array.isArray(v)) continue;
+      out[k] = v.map((x) => {
+        if (x && typeof x === 'object') return x;
+        if (typeof x === 'number') return x;
+        return String(x).trim();
+      }).filter((x) => x !== '' && x !== null);
     } else if (typeof base[k] === 'number') {
       const n = Number(v);
       out[k] = Number.isFinite(n) ? n : base[k];

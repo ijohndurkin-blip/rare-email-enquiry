@@ -62,6 +62,66 @@ db.exec(`
     WHERE message_id IS NOT NULL;
 `);
 
+db.exec(`
+  -- Install-wide settings such as the AI key.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  -- Every email the app may send for an enquiry: drafts waiting for approval,
+  -- scheduled automatic replies and follow-ups, and a record of what went out.
+  CREATE TABLE IF NOT EXISTS outbox (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id  INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    enquiry_id   INTEGER NOT NULL REFERENCES enquiries(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('reply','followup')),
+    step         INTEGER NOT NULL DEFAULT 0,
+    status       TEXT NOT NULL CHECK (status IN ('draft','scheduled','sent','cancelled','failed')),
+    auto         INTEGER NOT NULL DEFAULT 0,
+    subject      TEXT,
+    body         TEXT,
+    written_by   TEXT,
+    due_at       TEXT,
+    sent_at      TEXT,
+    error        TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, due_at);
+  CREATE INDEX IF NOT EXISTS idx_outbox_enquiry ON outbox(enquiry_id);
+
+  -- Website pages read to learn about the business.
+  CREATE TABLE IF NOT EXISTS knowledge_pages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    url         TEXT NOT NULL,
+    title       TEXT,
+    text        TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_pages_business ON knowledge_pages(business_id);
+`);
+
+// Columns added after the first release.
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+ensureColumn('enquiries', 'ai_summary', 'TEXT');
+ensureColumn('enquiries', 'ai_details', "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn('enquiries', 'ai_temperature', "TEXT CHECK (ai_temperature IN ('hot','warm','cold'))");
+ensureColumn('enquiries', 'ai_reason', 'TEXT');
+ensureColumn('messages', 'auto', 'INTEGER NOT NULL DEFAULT 0');
+
+function getAppSetting(key, fallback = null) {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  return row ? row.value : fallback;
+}
+function setAppSetting(key, value) {
+  if (value === null || value === undefined) db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+  else db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));
+}
+
 // Runs fn in a transaction. Nested calls join the outer transaction.
 let depth = 0;
 function tx(fn) {
@@ -80,4 +140,4 @@ function tx(fn) {
   }
 }
 
-module.exports = { db, tx, DATA_DIR };
+module.exports = { db, tx, DATA_DIR, getAppSetting, setAppSetting };
