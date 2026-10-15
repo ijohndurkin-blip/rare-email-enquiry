@@ -190,10 +190,16 @@ app.post('/api/admin/businesses/:id/demo', requireAdmin, (req, res) => {
   res.json({ created: loadDemo(b) });
 });
 
+// Clear enquiries. "fresh" (the default) also ignores everything already in the
+// mailbox, so only emails arriving from now on appear; otherwise the last 30 days
+// are imported again on the next inbox check.
 app.post('/api/admin/businesses/:id/clear', requireAdmin, (req, res) => {
-  const r = db.prepare('DELETE FROM enquiries WHERE business_id = ?').run(Number(req.params.id));
-  db.prepare("UPDATE businesses SET sync_state = '{}' WHERE id = ?").run(Number(req.params.id));
-  res.json({ deleted: Number(r.changes) });
+  const id = Number(req.params.id);
+  const fresh = req.body?.fresh !== false;
+  const r = db.prepare('DELETE FROM enquiries WHERE business_id = ?').run(id);
+  const contactsDeleted = req.body?.contacts ? Number(db.prepare('DELETE FROM contacts WHERE business_id = ?').run(id).changes) : 0;
+  db.prepare('UPDATE businesses SET sync_state = ? WHERE id = ?').run(JSON.stringify(fresh ? { startFrom: new Date().toISOString() } : {}), id);
+  res.json({ deleted: Number(r.changes), contactsDeleted, fresh });
 });
 
 settingsApi.post('/rotate-token', (req, res) => {

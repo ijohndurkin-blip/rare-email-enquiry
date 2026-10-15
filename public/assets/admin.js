@@ -155,10 +155,17 @@ async function renderSettings(id) {
         const r = await api(`${base}/demo`, { method: 'POST' });
         toast(`Loaded ${r.created} sample enquiries`);
       });
-      $('#clearBtn').addEventListener('click', async () => {
-        if (!confirm(`Delete every enquiry for ${b.name}? This cannot be undone.`)) return;
-        const r = await api(`${base}/clear`, { method: 'POST' });
-        toast(`Deleted ${r.deleted} enquiries`);
+      $('#clearBtn').addEventListener('click', () => {
+        $('#clearForm').reset();
+        $('#clearName').textContent = b.name;
+        $('#clearDialog').showModal();
+        $('#clearForm').onsubmit = async (ev) => {
+          ev.preventDefault();
+          const fresh = $('input[name="clearMode"]:checked').value === 'fresh';
+          const r = await api(`${base}/clear`, { method: 'POST', body: { fresh, contacts: $('#clearContacts').checked } });
+          $('#clearDialog').close();
+          toast(`Deleted ${r.deleted} enquiries${r.contactsDeleted ? ` and ${r.contactsDeleted} contacts` : ''}${fresh ? ' — only new emails will appear from now on' : ' — the last 30 days will be re-imported'}`);
+        };
       });
       $('#deleteBtn').addEventListener('click', async () => {
         if (prompt(`Type the business name to delete it and all its enquiries:\n${b.name}`) !== b.name) return;

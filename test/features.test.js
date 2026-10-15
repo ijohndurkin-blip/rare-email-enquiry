@@ -213,3 +213,61 @@ test('business owners can manage their own settings, but not other businesses or
     server.close();
   }
 });
+
+test('"Start fresh" ignores emails already in the mailbox; re-import brings them back', async () => {
+  const inbox = require('../src/inbox');
+  const raw = (subject, date) => Buffer.from(`From: Old Customer <old@example.com>\r\nTo: hello@biz.test\r\nSubject: ${subject}\r\nDate: ${date.toUTCString()}\r\nMessage-ID: <${subject.replace(/\W/g, '')}@x>\r\n\r\nHello\r\n`);
+  const before = new Date(Date.now() - 2 * 3600000);
+  const after = new Date(Date.now() + 60000);
+  const fakeImap = () => ({
+    mailbox: { uidValidity: 7, uidNext: 3 },
+    getMailboxLock: async () => ({ release() {} }),
+    search: async () => [1, 2],
+    async* fetch() {
+      yield { uid: 1, internalDate: before, source: raw('Old enquiry', before) };
+      yield { uid: 2, internalDate: after, source: raw('New enquiry', after) };
+    },
+  });
+
+  // Fresh start an hour ago: only the email that arrived afterwards is imported.
+  const fresh = { startFrom: new Date(Date.now() - 3600000).toISOString() };
+  const seen = [];
+  await inbox._syncFolder(fakeImap(), 'INBOX', fresh, 'inbox', async (m) => { seen.push(m.subject); });
+  assert.deepEqual(seen, ['New enquiry']);
+  assert.equal(fresh.inbox.lastUid, 2, 'skipped emails are marked as dealt with');
+
+  // Re-import (no start point): both come back.
+  const reimport = {};
+  const all = [];
+  await inbox._syncFolder(fakeImap(), 'INBOX', reimport, 'inbox', async (m) => { all.push(m.subject); });
+  assert.deepEqual(all, ['Old enquiry', 'New enquiry']);
+});
+
+test('admin "Clear all enquiries" can start fresh and optionally remove contacts', async () => {
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = (method, url, body, cookie) => fetch(base + url, {
+    method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined,
+  });
+  try {
+    const admin = (await call('POST', '/api/login', { password: 'admin-pass' })).headers.get('set-cookie').split(';')[0];
+    const b = makeBusiness({});
+    enq.ingest(b, { fromEmail: 'x@y.com', subject: 'Hi', body: 'Hello' }, { silent: true });
+    contacts.create(b.id, { name: 'Keep Me', email: 'keep@me.com' });
+    db.prepare('UPDATE businesses SET sync_state = ? WHERE id = ?').run(JSON.stringify({ inbox: { uidValidity: '1', lastUid: 50 } }), b.id);
+
+    const r = await (await call('POST', `/api/admin/businesses/${b.id}/clear`, { fresh: true }, admin)).json();
+    assert.equal(r.deleted, 1);
+    assert.equal(r.contactsDeleted, 0);
+    const state = enq.getBusiness('id', b.id).sync_state;
+    assert.ok(state.startFrom, 'remembers when the fresh start happened');
+    assert.equal(state.inbox, undefined);
+    assert.equal(contacts.list(b.id).length, 1, 'contacts kept unless asked');
+
+    const r2 = await (await call('POST', `/api/admin/businesses/${b.id}/clear`, { fresh: false, contacts: true }, admin)).json();
+    assert.equal(r2.contactsDeleted, 1);
+    assert.deepEqual(enq.getBusiness('id', b.id).sync_state, {});
+  } finally {
+    server.close();
+  }
+});

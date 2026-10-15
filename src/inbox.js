@@ -41,11 +41,14 @@ async function syncFolder(imap, folder, state, key, onMessage) {
     const prev = state[key] || {};
     // The first sync imports recent history quietly — no auto-replies to old mail.
     const initial = !prev.lastUid;
+    // After "Clear and start fresh", ignore anything that arrived before that moment.
+    const startFrom = state.startFrom ? Date.parse(state.startFrom) : null;
     let range;
     if (prev.uidValidity && String(prev.uidValidity) === String(box.uidValidity) && prev.lastUid) {
       range = { uid: `${prev.lastUid + 1}:*` };
     } else {
-      const since = new Date(Date.now() - FIRST_SYNC_DAYS * 86400000);
+      // IMAP searches by whole days, so look from the day before and filter exactly below.
+      const since = new Date(Math.max(Date.now() - FIRST_SYNC_DAYS * 86400000, startFrom ? startFrom - 86400000 : 0));
       const uids = await imap.search({ since }, { uid: true });
       if (!uids || !uids.length) {
         state[key] = { uidValidity: String(box.uidValidity), lastUid: Math.max(0, (box.uidNext || 1) - 1) };
@@ -55,8 +58,12 @@ async function syncFolder(imap, folder, state, key, onMessage) {
     }
     let lastUid = prev.lastUid || 0;
     let count = 0;
-    for await (const msg of imap.fetch(range.uid, { uid: true, source: true }, { uid: true })) {
+    for await (const msg of imap.fetch(range.uid, { uid: true, source: true, internalDate: true }, { uid: true })) {
       if (msg.uid <= (prev.lastUid || 0) && prev.uidValidity === String(box.uidValidity)) continue;
+      if (initial && startFrom && msg.internalDate && new Date(msg.internalDate).getTime() < startFrom) {
+        lastUid = Math.max(lastUid, msg.uid); // already in the mailbox before the fresh start: skip
+        continue;
+      }
       const parsed = await simpleParser(msg.source);
       await onMessage(parsed, initial);
       lastUid = Math.max(lastUid, msg.uid);
@@ -162,4 +169,4 @@ function startPoller() {
   return setInterval(tick, 60000);
 }
 
-module.exports = { syncBusiness, syncDue, testConnection, startPoller, stripQuoted };
+module.exports = { syncBusiness, syncDue, testConnection, startPoller, stripQuoted, _syncFolder: syncFolder };

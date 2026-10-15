@@ -52,6 +52,22 @@
     </form>
   </dialog>
 
+  <dialog id="clearDialog">
+    <form id="clearForm">
+      <h2 style="margin-bottom:6px">Clear all enquiries</h2>
+      <p class="ink-2" style="margin-top:0">Deletes every enquiry, conversation, draft and scheduled email for <b id="clearName"></b>, including the trash. The emails in the mailbox itself are not touched. This can't be undone.</p>
+      <div class="radio-cards" style="grid-template-columns:1fr">
+        <label><input type="radio" name="clearMode" value="fresh" checked><span><b>Start fresh</b><span>Ignore the emails already in the mailbox. Only emails that arrive from now on will appear. Best for demos.</span></span></label>
+        <label><input type="radio" name="clearMode" value="reimport"><span><b>Clear and re-import</b><span>Bring the last 30 days of emails back in on the next inbox check (quietly, with no automatic replies).</span></span></label>
+      </div>
+      <label class="chk field"><input type="checkbox" id="clearContacts"> Also delete all contacts</label>
+      <div class="foot">
+        <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
+        <button type="submit" class="primary danger" style="background:var(--critical);border-color:var(--critical);color:#fff">Clear enquiries</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="aiDialog">
     <form id="aiForm">
       <h2 style="margin-bottom:6px">AI settings</h2>
