@@ -26,6 +26,14 @@ The dashboard shows:
 - a "reply to these next" list
 - a board or list of every enquiry
 
+- **Highlights that need action.** The Hot leads tile and the "Waiting for a reply" card light up when there's something in them. Click "Waiting for a reply" to list who's waiting.
+- **Sent automatically.** A card listing the emails the autopilot sent: replies, follow-ups and phone-number chasers.
+- **Delete and trash.** Delete an enquiry (with its whole conversation) from the board, the list or the open enquiry. It goes to **Trash** (under the status filter), where it can be restored. Anything in the trash for 7 days is removed from the server for good.
+- **Contacts.** A list of previous customers (name, company, email, phone, notes). Add them by hand, import a CSV, paste rows from Excel or Google Sheets, or click "+ Add to contacts" on any enquiry. When a contact emails again, by email address or phone number, their enquiry is marked **★ Previous customer**.
+- **Settings.** The business owner has their own Settings tab with everything from the admin set-up: mailbox, knowledge, prices, autopilot and scoring. Only the AI key, the dashboard's web address and deleting the business stay with the admin.
+
+![Contacts](docs/contacts.png)
+
 It works on phones and supports dark mode.
 
 ## Setting up a business (admin)
@@ -48,6 +56,7 @@ The autopilot has these rules:
 | Rule | Options |
 |---|---|
 | **Reply to new enquiries** | Off / prepare a draft to approve / send automatically · everyone, or only people who didn't leave a phone number · written by AI or from your template · ask for their phone number when it's missing · wait N minutes before sending |
+| **Chase for a phone number** | For customers who didn't leave a number and haven't replied to the first email · off / draft / automatic · days between chasers (e.g. `1, 1` = the next day, then the day after) · "send one more a week later" · AI or templates. Each chaser mentions when they got in touch ("yesterday", "on Monday", "on Monday 6 October"). Stops when they reply or give a number |
 | **Follow up when they go quiet** | Off / draft / automatic · after which days (e.g. `3, 7`) · time of day · AI or templates |
 | **Hot lead alerts** | Email address · hot leads only, or every enquiry |
 | **AI sorting** | Summaries, junk filtering and hot/warm/cold judged by AI |
@@ -70,6 +79,8 @@ Without a key everything still works: replies come from your templates, and hot/
 ## Lead scoring without AI
 
 Each enquiry starts at 20 points and gains or loses points for buying words (+12 to +30), urgency (+18), mentions of the business's services (+8 to +15), a budget (+15, or −10 if it's under the business's minimum), a phone number (+10), a specific date (+8), a business email address (+5) and follow-up emails (+10 each). Early-stage words cost −15, and a lead loses 10–30 points once it has gone quiet for over a week. By default hot is 60+ and warm is 30–59. You can change these cut-offs and the word lists per business. With AI on, AI judges the temperature, and these signals are still shown.
+
+**Always-hot words.** Each business can list words and phrases (e.g. *price*, *deposit*, *this week*). If an email contains at least two different ones (the number is adjustable), it goes straight into Hot whatever else it says. A word inside a longer phrase on the list only counts once.
 
 ## Other ways in
 
