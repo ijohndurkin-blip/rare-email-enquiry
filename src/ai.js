@@ -201,7 +201,10 @@ ${knowledgeBlock(business)}`;
  */
 async function draftReply(business, thread, purpose, opts = {}) {
   const tasks = [];
-  if (purpose === 'followup') {
+  if (purpose === 'phonechase') {
+    tasks.push(`Write follow-up email number ${opts.followUpNumber || 1}. The customer sent their enquiry ${opts.enquiryWhen || 'recently'} but hasn't replied to our last email or given us a phone number. Refer to when they got in touch naturally, using these words: "${opts.enquiryWhen || 'recently'}". The main aim is to get their phone number so we can talk it through: ask for the best number to reach them on${business.settings.info.phone ? `, or invite them to call us on ${business.settings.info.phone}` : ''}. Keep it short, friendly and not pushy, and don't repeat earlier emails.`);
+    opts = { ...opts, askPhone: false };
+  } else if (purpose === 'followup') {
     tasks.push(`Write follow-up email number ${opts.followUpNumber || 1}. The customer hasn't replied to our last email. Gently check in, briefly restate how we can help with what they asked about, and make it easy to reply. Don't be pushy and don't repeat the whole previous email.`);
   } else {
     tasks.push('Write a reply to the customer\'s latest message.');

@@ -8,7 +8,9 @@ const FREE_MAIL = new Set([
   'btinternet.com', 'sky.com', 'virginmedia.com', 'protonmail.com', 'proton.me', 'gmx.com',
 ]);
 
-const PHONE_RE = /(?:\+?\d[\d\s().-]{8,}\d)/;
+// Something that looks like a phone number; checked further in extractPhone().
+const PHONE_CANDIDATE_RE = /(?:\+|\b00)?\(?\d[\d\s().-]{7,}\d/g;
+const PHONE_LABEL_RE = /(?:tel|telephone|phone|mobile|mob|cell|call|ring|whatsapp|number|contact)\b[^\n\d+]{0,20}$/i;
 const MONEY_RE = /(?:[£$€]\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K)?)|(?:(\d[\d,]*(?:\.\d+)?)\s?(k|K)?\s?(?:pounds|gbp|usd|dollars|euros?|eur)\b)|(?:budget[^.\n]{0,25}?(\d[\d,]*(?:\.\d+)?)\s?(k|K)?)/gi;
 const DATE_RE = /\b(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b|\bnext (?:week|month)\b/i;
 
@@ -40,11 +42,25 @@ function parseBudget(text) {
   return best;
 }
 
+// Find a phone number, while ignoring dates, order numbers and similar digit runs.
 function extractPhone(text) {
-  const m = text.match(PHONE_RE);
-  if (!m) return null;
-  const digits = m[0].replace(/\D/g, '');
-  return digits.length >= 9 && digits.length <= 15 ? m[0].trim() : null;
+  for (const m of String(text || '').matchAll(PHONE_CANDIDATE_RE)) {
+    const raw = m[0].trim();
+    if (/\d{4}-\d{1,2}-\d{1,2}/.test(raw) || /\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/.test(raw)) continue; // dates
+    const digits = raw.replace(/\D/g, '');
+    const international = raw.startsWith('+') || raw.startsWith('00');
+    const labelled = PHONE_LABEL_RE.test(text.slice(Math.max(0, m.index - 30), m.index));
+    if (international && digits.length >= 10 && digits.length <= 15) return raw;
+    if (/^0\d{9,10}$/.test(digits)) return raw; // UK-style: 01…, 02…, 03…, 07…
+    if (labelled && digits.length >= 9 && digits.length <= 15) return raw;
+  }
+  return null;
+}
+
+// "Always hot" words: count distinct matches, ignoring a word inside a longer matched phrase.
+function hotMatches(text, terms) {
+  const hits = findTerms(text, terms);
+  return hits.filter((h) => !hits.some((o) => o !== h && o.includes(h)));
 }
 
 /**
@@ -62,7 +78,7 @@ function scoreEnquiry(input, rules) {
 
   const spamHits = findTerms(text, rules.spamTerms);
   if (spamHits.length) {
-    return { score: 0, spam: true, signals: [{ label: `Looks like spam ("${spamHits[0]}")`, points: 0 }], budget: null, phone: null };
+    return { score: 0, spam: true, forceHot: false, signals: [{ label: `Looks like spam ("${spamHits[0]}")`, points: 0 }], budget: null, phone: null };
   }
 
   add('Starting score', 20); // every genuine enquiry starts with a little warmth
@@ -104,9 +120,13 @@ function scoreEnquiry(input, rules) {
   const low = findTerms(text, rules.lowIntentTerms);
   if (low.length) add(`Early stage: ${low.slice(0, 2).join(', ')}`, -15);
 
+  const hot = hotMatches(text, rules.hotTerms);
+  const forceHot = hot.length > 0 && hot.length >= Math.max(1, Number(rules.hotMinMatches) || 2);
+  if (forceHot) add(`Always-hot words: ${hot.slice(0, 4).join(', ')}`, 0);
+
   const total = signals.reduce((n, s) => n + s.points, 0);
   const score = Math.max(0, Math.min(100, Math.round(total)));
-  return { score, spam: false, signals, budget, phone };
+  return { score, spam: false, forceHot, signals, budget, phone };
 }
 
 /** Leads cool off as they age without new contact from the customer. */
@@ -124,4 +144,4 @@ function temperatureFor(score, rules) {
   return 'cold';
 }
 
-module.exports = { scoreEnquiry, ageAdjustment, temperatureFor, parseBudget, extractPhone, findTerms };
+module.exports = { scoreEnquiry, ageAdjustment, temperatureFor, parseBudget, extractPhone, findTerms, hotMatches };

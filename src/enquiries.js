@@ -2,6 +2,7 @@ const { EventEmitter } = require('node:events');
 const { db, tx } = require('./db');
 const { loadSettings } = require('./settings');
 const { scoreEnquiry, ageAdjustment, temperatureFor } = require('./scoring');
+const contacts = require('./contacts');
 
 const OPEN = ['new', 'contacted', 'quoted'];
 // 'inbound' / 'outbound' events drive the automations (see automations.js).
@@ -31,8 +32,8 @@ function rescore(business, enquiryId) {
     inboundCount: inbound.length,
   }, business.settings.scoring);
   const status = result.spam && e.status === 'new' ? 'spam' : e.status;
-  db.prepare(`UPDATE enquiries SET score = ?, signals = ?, budget = ?, phone = COALESCE(phone, ?), status = ?, updated_at = ? WHERE id = ?`)
-    .run(result.score, JSON.stringify(result.signals), result.budget, result.phone, status, now(), enquiryId);
+  db.prepare(`UPDATE enquiries SET score = ?, signals = ?, budget = ?, phone = COALESCE(phone, ?), status = ?, force_hot = ?, updated_at = ? WHERE id = ?`)
+    .run(result.score, JSON.stringify(result.signals), result.budget, result.phone, status, result.forceHot ? 1 : 0, now(), enquiryId);
 }
 
 /**
@@ -60,7 +61,7 @@ function ingest(business, msg, { silent = false } = {}) {
 
     const since = new Date(Date.parse(sentAt) - THREAD_WINDOW_DAYS * 86400000).toISOString();
     const open = db.prepare(`SELECT id FROM enquiries WHERE business_id = ? AND from_email = ?
-      AND status IN ('new','contacted','quoted') AND last_inbound_at >= ? ORDER BY last_inbound_at DESC LIMIT 1`)
+      AND status IN ('new','contacted','quoted') AND deleted_at IS NULL AND last_inbound_at >= ? ORDER BY last_inbound_at DESC LIMIT 1`)
       .get(business.id, fromEmail, since);
 
     let id;
@@ -92,7 +93,7 @@ function recordResponse(business, { toEmail, enquiryId, date, body, subject, mes
   const sentAt = date ? new Date(date).toISOString() : now();
   const e = enquiryId
     ? db.prepare('SELECT * FROM enquiries WHERE id = ? AND business_id = ?').get(enquiryId, business.id)
-    : db.prepare(`SELECT * FROM enquiries WHERE business_id = ? AND from_email = ? AND received_at <= ?
+    : db.prepare(`SELECT * FROM enquiries WHERE business_id = ? AND from_email = ? AND received_at <= ? AND deleted_at IS NULL
         ORDER BY last_inbound_at DESC LIMIT 1`).get(business.id, normEmail(toEmail), sentAt);
   if (!e) return null;
   if (messageId && db.prepare('SELECT 1 FROM messages WHERE enquiry_id = ? AND message_id = ?').get(e.id, messageId)) return e.id;
@@ -112,7 +113,7 @@ function recordResponse(business, { toEmail, enquiryId, date, body, subject, mes
 
 // --- Read models -----------------------------------------------------------
 
-function present(business, e, at = Date.now()) {
+function present(business, e, at = Date.now(), match = null) {
   const rules = business.settings.scoring;
   const signals = JSON.parse(e.signals || '[]');
   let score = e.score;
@@ -126,7 +127,8 @@ function present(business, e, at = Date.now()) {
   }
   const aiOn = business.settings.automations.ai.enabled;
   const aiTemp = aiOn && e.ai_temperature && !closed ? e.ai_temperature : null;
-  const temperature = e.temp_override || aiTemp || temperatureFor(score, rules);
+  const wordsHot = e.force_hot && !closed ? 'hot' : null;
+  const temperature = e.temp_override || wordsHot || aiTemp || temperatureFor(score, rules);
   let aiDetails = {};
   try { aiDetails = JSON.parse(e.ai_details || '{}'); } catch { /* ignore */ }
   const awaitingReply = !closed && (!e.last_response_at || e.last_response_at < e.last_inbound_at);
@@ -144,7 +146,9 @@ function present(business, e, at = Date.now()) {
     score,
     temperature,
     tempOverridden: Boolean(e.temp_override),
-    tempSource: e.temp_override ? 'manual' : aiTemp ? 'ai' : 'rules',
+    tempSource: e.temp_override ? 'manual' : wordsHot ? 'words' : aiTemp ? 'ai' : 'rules',
+    contact: match ? match(e.from_email, e.phone) : null,
+    deletedAt: e.deleted_at || null,
     aiSummary: e.ai_summary || null,
     aiReason: e.ai_reason || null,
     aiDetails,
@@ -164,16 +168,18 @@ function present(business, e, at = Date.now()) {
   };
 }
 
-function listEnquiries(business, { includeSpam = false } = {}) {
+function listEnquiries(business, { includeSpam = false, trash = false } = {}) {
   const rows = db.prepare(`SELECT e.*,
       (SELECT substr(body, 1, 220) FROM messages m WHERE m.enquiry_id = e.id AND m.direction = 'in' ORDER BY sent_at DESC LIMIT 1) AS preview,
       (SELECT COUNT(*) FROM messages m WHERE m.enquiry_id = e.id) AS message_count,
       (SELECT COUNT(*) FROM outbox o WHERE o.enquiry_id = e.id AND o.status = 'draft') AS draft_count,
       (SELECT MIN(due_at) FROM outbox o WHERE o.enquiry_id = e.id AND o.status = 'scheduled') AS next_scheduled
-    FROM enquiries e WHERE e.business_id = ? ${includeSpam ? '' : "AND e.status != 'spam'"}
-    ORDER BY e.last_inbound_at DESC`).all(business.id);
+    FROM enquiries e WHERE e.business_id = ? ${includeSpam || trash ? '' : "AND e.status != 'spam'"}
+      AND e.deleted_at IS ${trash ? 'NOT NULL' : 'NULL'}
+    ORDER BY ${trash ? 'e.deleted_at' : 'e.last_inbound_at'} DESC`).all(business.id);
   const at = Date.now();
-  return rows.map((r) => present(business, r, at));
+  const match = contacts.matcher(business.id);
+  return rows.map((r) => present(business, r, at, match));
 }
 
 function getEnquiry(business, id) {
@@ -184,7 +190,7 @@ function getEnquiry(business, id) {
   const outbox = db.prepare(`SELECT id, kind, step, status, auto, subject, body, written_by AS writtenBy, due_at AS dueAt, error, created_at AS createdAt
     FROM outbox WHERE enquiry_id = ? AND status IN ('draft','scheduled','failed') ORDER BY COALESCE(due_at, created_at)`).all(id)
     .map((o) => ({ ...o, auto: Boolean(o.auto) }));
-  return { ...present(business, e), messages, outbox };
+  return { ...present(business, e, Date.now(), contacts.matcher(business.id)), messages, outbox };
 }
 
 function updateEnquiry(business, id, patch) {
@@ -300,10 +306,17 @@ function summary(business, days = 30) {
       pipelineValue: open.reduce((s, e) => s + (e.value || e.budget || 0), 0),
       spam: all.filter((e) => e.status === 'spam' && Date.parse(e.receivedAt) >= start).length,
       drafts: db.prepare(`SELECT COUNT(*) AS n FROM outbox o JOIN enquiries e ON e.id = o.enquiry_id
-        WHERE o.business_id = ? AND o.status = 'draft' AND e.status != 'spam'`).get(business.id).n,
+        WHERE o.business_id = ? AND o.status = 'draft' AND e.status != 'spam' AND e.deleted_at IS NULL`).get(business.id).n,
       autoSent: db.prepare(`SELECT COUNT(*) AS n FROM messages m JOIN enquiries e ON e.id = m.enquiry_id
-        WHERE e.business_id = ? AND m.direction = 'out' AND m.auto = 1 AND m.sent_at >= ?`).get(business.id, new Date(start).toISOString()).n,
+        WHERE e.business_id = ? AND m.direction = 'out' AND m.auto = 1 AND m.sent_at >= ? AND e.deleted_at IS NULL`).get(business.id, new Date(start).toISOString()).n,
+      trash: db.prepare('SELECT COUNT(*) AS n FROM enquiries WHERE business_id = ? AND deleted_at IS NOT NULL').get(business.id).n,
+      returning: open.filter((e) => e.contact).length,
     },
+    recentAuto: db.prepare(`SELECT o.id, o.enquiry_id AS enquiryId, o.kind, o.step, o.sequence, o.subject, o.sent_at AS sentAt,
+        e.from_name AS fromName, e.from_email AS fromEmail
+      FROM outbox o JOIN enquiries e ON e.id = o.enquiry_id
+      WHERE o.business_id = ? AND o.status = 'sent' AND o.auto = 1 AND e.deleted_at IS NULL
+      ORDER BY o.sent_at DESC LIMIT 8`).all(business.id),
     byTemp,
     status,
     series,
@@ -311,7 +324,43 @@ function summary(business, days = 30) {
   };
 }
 
+// --- Trash -----------------------------------------------------------------------
+// Deleted enquiries (with their whole conversation) wait in the trash for 7 days,
+// then are removed from the server for good.
+const TRASH_DAYS = 7;
+
+function trashEnquiry(business, id) {
+  return tx(() => {
+    const r = db.prepare('UPDATE enquiries SET deleted_at = ?, updated_at = ? WHERE id = ? AND business_id = ? AND deleted_at IS NULL')
+      .run(now(), now(), id, business.id);
+    // Nothing further goes out for a deleted enquiry.
+    db.prepare("UPDATE outbox SET status = 'cancelled' WHERE enquiry_id = ? AND status IN ('draft','scheduled','failed')").run(id);
+    return Number(r.changes) > 0;
+  });
+}
+
+function restoreEnquiry(business, id) {
+  return Number(db.prepare('UPDATE enquiries SET deleted_at = NULL, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(now(), id, business.id).changes) > 0;
+}
+
+function deleteForever(business, id) {
+  return Number(db.prepare('DELETE FROM enquiries WHERE id = ? AND business_id = ? AND deleted_at IS NOT NULL')
+    .run(id, business.id).changes) > 0;
+}
+
+function emptyTrash(business) {
+  return Number(db.prepare('DELETE FROM enquiries WHERE business_id = ? AND deleted_at IS NOT NULL').run(business.id).changes);
+}
+
+/** Permanently remove everything that has been in the trash for over 7 days (all businesses). */
+function purgeTrash() {
+  const cutoff = new Date(Date.now() - TRASH_DAYS * 86400000).toISOString();
+  return Number(db.prepare('DELETE FROM enquiries WHERE deleted_at IS NOT NULL AND deleted_at < ?').run(cutoff).changes);
+}
+
 module.exports = {
   events, getBusiness, ingest, recordResponse, rescore, rescoreAll,
   listEnquiries, getEnquiry, updateEnquiry, summary, OPEN,
+  trashEnquiry, restoreEnquiry, deleteForever, emptyTrash, purgeTrash, TRASH_DAYS,
 };

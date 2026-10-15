@@ -25,7 +25,7 @@ const TEMP_DESC = {
 async function load() {
   const [summary, enquiries] = await Promise.all([
     call(`${base}/summary?days=${state.days}`),
-    call(`${base}/enquiries${$('#fStatus').value === 'spam' ? '?spam=1' : ''}`),
+    call(`${base}/enquiries${{ spam: '?spam=1', trash: '?trash=1' }[$('#fStatus').value] || ''}`),
   ]);
   state.summary = summary;
   state.enquiries = enquiries;
@@ -35,6 +35,7 @@ async function load() {
   renderKpis();
   renderChart();
   renderAttention();
+  renderAuto();
   renderEnquiries();
 }
 
@@ -65,7 +66,9 @@ function renderTemps() {
   const active = $('#fTemp').value;
   $('#tempTiles').innerHTML = TEMPS.map((t) => {
     const w = waiting(t);
-    return `<button type="button" class="temp-tile t-${t}" data-temp="${t}" aria-pressed="${active === t}">
+    const lit = t === 'hot' && s.byTemp.hot > 0;
+    return `<button type="button" class="temp-tile t-${t}${lit ? ' lit' : ''}" data-temp="${t}" aria-pressed="${active === t}">
+      ${lit ? '<span class="lit-badge">Act now</span>' : ''}
       <div class="label">${ICONS[t]}<span>${TEMP_LABEL[t]}<span class="hide-sm"> leads</span></span></div>
       <div class="big num">${s.byTemp[t]}</div>
       <div class="desc">${TEMP_DESC[t]}</div>
@@ -115,6 +118,8 @@ function renderKpis() {
     {
       label: 'Waiting for a reply',
       value: t.awaitingReply,
+      cls: t.awaitingReply ? (t.overdue ? 'alert overdue' : 'alert') : '',
+      action: 'awaiting',
       foot: t.overdue
         ? `<span class="status-critical">${ICONS.alert} ${t.overdue} over your ${formatHours(target)} target</span>`
         : `<span class="delta-up">${ICONS.check} All within ${formatHours(target)} target</span>`,
@@ -133,11 +138,45 @@ function renderKpis() {
         : `<span class="ink-2">${Math.round(t.winRate * 100)}% win rate${t.wonValue ? ` · ${money(t.wonValue, currency)}` : ''}</span>`,
     },
   ];
-  $('#kpis').innerHTML = tiles.map((k) => `<div class="card kpi">
-    <div class="k-label">${k.label}</div>
+  $('#kpis').innerHTML = tiles.map((k) => `<div class="card kpi ${k.cls || ''}" ${k.action ? `role="button" tabindex="0" data-kpi="${k.action}" title="Show who's waiting"` : ''}>
+    <div class="k-label">${k.cls ? `<span class="pulse" aria-hidden="true"></span>` : ''}${k.label}</div>
     <div class="k-value num">${k.value}</div>
     <div class="k-foot">${k.foot}</div>
   </div>`).join('');
+  $$('[data-kpi="awaiting"]').forEach((el) => {
+    const go = () => {
+      $('#fAwaiting').checked = true;
+      if ($('#fStatus').value === 'trash' || $('#fStatus').value === 'spam') { $('#fStatus').value = 'open'; load(); }
+      renderEnquiries();
+      $('#enqTitle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sent automatically
+
+function autoLabel(o) {
+  if (o.kind === 'reply') return 'Reply to new enquiry';
+  if (o.sequence === 'phone') return `Phone-number chaser ${o.step}`;
+  return `Follow-up ${o.step}`;
+}
+
+function renderAuto() {
+  const { recentAuto, totals: t, days } = state.summary;
+  $('#autoSub').textContent = t.autoSent ? `${t.autoSent} sent in the last ${days} days` : 'Emails the autopilot sent for you';
+  $('#autoList').innerHTML = recentAuto.length ? recentAuto.map((o) => `<li><button type="button" data-id="${o.enquiryId}">
+      <span class="auto-ico" aria-hidden="true">${ICONS.bolt}</span>
+      <span class="body">
+        <div class="who">${esc(o.fromName || o.fromEmail)}</div>
+        <div class="what">${esc(autoLabel(o))}</div>
+      </span>
+      <span class="meta muted">${timeAgo(o.sentAt)}</span>
+    </button></li>`).join('')
+    : `<li class="empty">Nothing sent automatically yet. Switch on the autopilot in <a href="#settings">Settings</a>.</li>`;
+  $$('#autoList button').forEach((b) => b.addEventListener('click', () => openDrawer(Number(b.dataset.id))));
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +296,7 @@ function renderAttention() {
   $('#attention').innerHTML = list.length ? list.map((e) => `<li><button type="button" data-id="${e.id}">
       <span class="dot t-${e.temperature}" title="${TEMP_LABEL[e.temperature]}"></span>
       <span class="body">
-        <div class="who">${esc(e.fromName || e.fromEmail)}</div>
+        <div class="who">${esc(e.fromName || e.fromEmail)} ${e.contact ? `<span class="pill returning" title="Previous customer">${ICONS.star}</span>` : ''}</div>
         <div class="what">${esc(e.aiSummary || e.subject)}</div>
       </span>
       <span class="meta">
@@ -277,8 +316,11 @@ function filtered() {
   const temp = $('#fTemp').value;
   const status = $('#fStatus').value;
   const awaiting = $('#fAwaiting').checked;
+  const returning = $('#fReturning').checked;
   return state.enquiries.filter((e) => {
     if (temp && e.temperature !== temp) return false;
+    if (returning && !e.contact) return false;
+    if (status === 'trash') return true;
     if (status === 'open' && !['new', 'contacted', 'quoted'].includes(e.status)) return false;
     if (status && status !== 'open' && e.status !== status) return false;
     if (awaiting && !e.awaitingReply) return false;
@@ -287,12 +329,26 @@ function filtered() {
   });
 }
 
+function returningPill(e) {
+  if (!e.contact) return '';
+  const who = [e.contact.name, e.contact.company].filter(Boolean).join(', ');
+  return `<span class="pill returning" title="${esc(who)}">${ICONS.star} Previous customer</span>`;
+}
+
+function rowActions(e) {
+  if (e.deletedAt) {
+    return `<span class="row-actions"><button type="button" class="ghost" data-restore="${e.id}">Restore</button><button type="button" class="ghost danger" data-forever="${e.id}">Delete forever</button></span>`;
+  }
+  return `<button type="button" class="ghost icon-btn" data-trash="${e.id}" title="Delete" aria-label="Delete enquiry from ${esc(e.fromName || e.fromEmail)}">${ICONS.trash}</button>`;
+}
+
 function card(e) {
-  return `<div class="card" tabindex="0" role="button" data-id="${e.id}" style="--t:var(--${e.temperature})">
+  return `<div class="card${e.contact ? ' is-returning' : ''}" tabindex="0" role="button" data-id="${e.id}" style="--t:var(--${e.temperature})">
     <div class="ecard-top">
       <span class="ecard-name">${esc(e.fromName || e.fromEmail)}</span>
-      <span class="ecard-time">${timeAgo(e.lastInboundAt)}</span>
+      <span class="ecard-time">${e.deletedAt ? `Deleted ${timeAgo(e.deletedAt)}` : timeAgo(e.lastInboundAt)}</span>
     </div>
+    ${e.contact ? `<div style="margin-top:4px">${returningPill(e)}</div>` : ''}
     <div class="ecard-subj">${esc(e.subject)}</div>
     <div class="ecard-prev">${e.aiSummary ? `<span class="ai-sum">${esc(e.aiSummary)}</span>` : esc(e.preview || '')}</div>
     <div class="ecard-foot">
@@ -300,6 +356,7 @@ function card(e) {
       ${e.draftCount ? '<span class="pill draft">✉ Reply ready</span>' : waitingPill(e)}
       ${!e.draftCount && e.nextScheduledAt ? `<span class="pill waiting" title="Follow-up scheduled">${ICONS.clock} Follow-up ${timeUntil(e.nextScheduledAt)}</span>` : ''}
       <span class="score" title="Lead score out of 100">${e.score}</span>
+      ${rowActions(e)}
     </div>
   </div>`;
 }
@@ -323,22 +380,64 @@ function renderEnquiries() {
   } else {
     const sorted = [...items].sort((a, b) => Date.parse(b.lastInboundAt) - Date.parse(a.lastInboundAt));
     host.innerHTML = sorted.length ? `<div class="table-wrap"><table class="list">
-      <thead><tr><th>Lead</th><th>From</th><th>Subject</th><th>Status</th><th>Reply</th><th>Received</th><th class="num">Score</th></tr></thead>
-      <tbody>${sorted.map((e) => `<tr tabindex="0" data-id="${e.id}">
+      <thead><tr><th>Lead</th><th>From</th><th>Subject</th><th>Status</th><th>Reply</th><th>Received</th><th class="num">Score</th><th><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${sorted.map((e) => `<tr tabindex="0" data-id="${e.id}" class="${e.contact ? 'is-returning' : ''}">
         <td>${tempPill(e.temperature)}</td>
-        <td><div style="font-weight:600">${esc(e.fromName || '')}</div><div class="muted">${esc(e.fromEmail)}</div></td>
+        <td><div style="font-weight:600">${esc(e.fromName || '')} ${e.contact ? `<span class="pill returning" title="Previous customer">${ICONS.star}</span>` : ''}</div><div class="muted">${esc(e.fromEmail)}</div></td>
         <td class="subj">${esc(e.aiSummary || e.subject)}</td>
         <td><span class="pill status ${e.status}">${STATUS_LABEL[e.status]}</span></td>
         <td>${waitingPill(e) || `<span class="muted">${e.lastResponseAt ? 'Replied' : '—'}</span>`}</td>
         <td class="muted" style="white-space:nowrap">${timeAgo(e.receivedAt)}</td>
         <td class="num">${e.score}</td>
+        <td style="text-align:right">${rowActions(e)}</td>
       </tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">No enquiries match these filters.</div>';
   }
   $$('[data-id]', host).forEach((el) => {
     el.addEventListener('click', () => openDrawer(Number(el.dataset.id)));
-    el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDrawer(Number(el.dataset.id)); } });
+    el.addEventListener('keydown', (ev) => { if (ev.target === el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); openDrawer(Number(el.dataset.id)); } });
   });
+  wireRowActions(host);
+  const trash = $('#fStatus').value === 'trash';
+  const note = $('#trashNote');
+  note.classList.toggle('hidden', !trash);
+  if (trash) {
+    note.innerHTML = `${ICONS.trash}<span>Deleted enquiries stay here for 7 days, then they're removed for good.</span>${items.length ? '<button type="button" class="danger" id="emptyTrash" style="margin-left:auto">Empty trash now</button>' : ''}`;
+    $('#emptyTrash')?.addEventListener('click', async () => {
+      if (!confirm('Permanently delete everything in the trash? This can\'t be undone.')) return;
+      const r = await call(`${base}/trash`, { method: 'DELETE' });
+      toast(`${r.deleted} deleted for good`);
+      load();
+    });
+  }
+}
+
+// Delete / restore buttons on cards and rows (they sit inside clickable cards).
+function wireRowActions(host) {
+  $$('[data-trash]', host).forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); trashEnquiry(Number(b.dataset.trash)); }));
+  $$('[data-restore]', host).forEach((b) => b.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    await call(`${base}/enquiries/${b.dataset.restore}/restore`, { method: 'POST' });
+    toast('Restored');
+    load();
+  }));
+  $$('[data-forever]', host).forEach((b) => b.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (!confirm('Delete this enquiry and its emails for good? This can\'t be undone.')) return;
+    await call(`${base}/trash/${b.dataset.forever}`, { method: 'DELETE' });
+    toast('Deleted for good');
+    load();
+  }));
+}
+
+async function trashEnquiry(id) {
+  await call(`${base}/enquiries/${id}`, { method: 'DELETE' });
+  if (state.openId === id) closeDrawer();
+  toastAction('Moved to trash', 'Undo', async () => {
+    await call(`${base}/enquiries/${id}/restore`, { method: 'POST' });
+    load();
+  });
+  load();
 }
 
 // ---------------------------------------------------------------------------
@@ -428,16 +527,22 @@ function renderDrawer(e) {
         ${realEmail ? `<a href="mailto:${esc(e.fromEmail)}">${esc(e.fromEmail)}</a>` : ''}
         ${e.phone ? `<a href="tel:${esc(e.phone.replace(/[^\d+]/g, ''))}">${esc(e.phone)}</a>` : '<span class="muted">No phone number</span>'}
       </div>
+      <div style="margin-top:8px">${e.contact
+        ? `${returningPill(e)} <span class="muted" style="font-size:13px">${esc([e.contact.name, e.contact.company].filter(Boolean).join(' · '))}</span>`
+        : '<button type="button" class="ghost" id="dAddContact" style="padding:3px 8px;font-size:13px">+ Add to contacts</button>'}</div>
       ${e.aiSummary ? `<div class="summary-box"><div class="sum">${esc(e.aiSummary)}</div>
         ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<span><b>${k}:</b> ${esc(v)}</span>`).join('')}</div>` : ''}
         ${d.questions?.length ? `<div class="facts"><span><b>Asked:</b> ${d.questions.map(esc).join(' · ')}</span></div>` : ''}</div>` : ''}
       <div class="actions">
-        ${!drafts.length && realEmail ? `${s.aiEnabled ? '<button type="button" class="primary" id="dDraft">✨ Write a reply</button>' : ''}<button type="button" id="dWrite" ${s.aiEnabled ? '' : 'class="primary"'}>Write my own</button>` : ''}
+        ${e.deletedAt ? '<button type="button" class="primary" id="dRestore">Restore from trash</button>' : ''}
+        ${!e.deletedAt && !drafts.length && realEmail ? `${s.aiEnabled ? '<button type="button" class="primary" id="dDraft">✨ Write a reply</button>' : ''}<button type="button" id="dWrite" ${s.aiEnabled ? '' : 'class="primary"'}>Write my own</button>` : ''}
         ${e.phone ? `<a class="btn" href="tel:${esc(e.phone.replace(/[^\d+]/g, ''))}">Call</a>` : ''}
-        ${e.awaitingReply ? '<button type="button" id="dReplied">✓ Mark as replied</button>' : ''}
+        ${e.awaitingReply && !e.deletedAt ? '<button type="button" id="dReplied">✓ Mark as replied</button>' : ''}
+        ${e.deletedAt ? '' : `<button type="button" class="ghost danger" id="dDelete" style="margin-left:auto" title="Delete this enquiry and its emails">${ICONS.trash} Delete</button>`}
       </div>
     </div>
     <div class="drawer-body">
+      ${e.deletedAt ? `<div class="banner" style="background:var(--surface-2);color:var(--ink-2)">${ICONS.trash}<span>In the trash since ${formatDateTime(e.deletedAt)}. It will be removed for good on ${formatDateTime(new Date(Date.parse(e.deletedAt) + 7 * 86400000).toISOString())}.</span></div>` : ''}
       <div id="composers">${drafts.map((o) => composerHtml(e, o)).join('')}</div>
 
       ${scheduled.length ? `<div class="block"><h3>Coming up</h3>${scheduled.map((o) => `<div class="sched">
@@ -479,6 +584,7 @@ function renderDrawer(e) {
 
       <div class="block">
         <h3>Why it's ${TEMP_LABEL[e.temperature].toLowerCase()}${e.tempSource === 'manual' ? ' (set by hand)' : ''}</h3>
+        ${e.tempSource === 'words' ? '<p class="ink-2" style="margin:0 0 8px">It contains your always-hot words (see the signals below).</p>' : ''}
         ${e.tempSource === 'ai' && e.aiReason ? `<p class="ink-2" style="margin:0 0 8px">${esc(e.aiReason)}</p>` : ''}
         <details ${e.tempSource === 'rules' ? 'open' : ''}><summary class="muted" style="cursor:pointer;font-size:12px">Score ${e.score}/100 from signals in the email</summary>
         <ul class="why">
@@ -503,6 +609,11 @@ function wireDrawer(e) {
   $('#dValue').addEventListener('change', (ev) => save({ value: ev.target.value }, 'Value saved'));
   $('#dNotes').addEventListener('blur', (ev) => { if (ev.target.value !== e.notes) save({ notes: ev.target.value }, 'Notes saved'); });
   $('#dReplied')?.addEventListener('click', () => save({ markReplied: true }, 'Marked as replied'));
+  $('#dDelete')?.addEventListener('click', () => trashEnquiry(e.id));
+  $('#dRestore')?.addEventListener('click', async () => refresh(await call(`${base}/enquiries/${e.id}/restore`, { method: 'POST' }), 'Restored'));
+  $('#dAddContact')?.addEventListener('click', () => Contacts.openDialog({
+    name: e.fromName || '', email: e.fromEmail.endsWith('@manual.local') ? '' : e.fromEmail, phone: e.phone || '',
+  }, async () => refresh(await call(`${base}/enquiries/${e.id}`), 'Added to contacts')));
   $('#rvNext')?.addEventListener('click', () => reviewStep(1));
   $('#rvPrev')?.addEventListener('click', () => reviewStep(-1));
 
@@ -624,7 +735,7 @@ $$('[data-view]').forEach((b) => b.addEventListener('click', () => {
   state.view = b.dataset.view;
   renderEnquiries();
 }));
-['#q', '#fTemp', '#fAwaiting'].forEach((s) => $(s).addEventListener('input', () => { renderTemps(); renderEnquiries(); }));
+['#q', '#fTemp', '#fAwaiting', '#fReturning'].forEach((s) => $(s).addEventListener('input', () => { renderTemps(); renderEnquiries(); }));
 $('#fStatus').addEventListener('change', load);
 $('#scrim').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && state.openId) closeDrawer(); });
@@ -651,11 +762,43 @@ let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => state.summary && renderChart(), 150); });
 
 api('/api/me').then((me) => { if (me.admin) $('#adminLink').classList.remove('hidden'); });
+
+// ---------------------------------------------------------------------------
+// Tabs: Enquiries (#), Contacts (#contacts), Settings (#settings).
 // Links like /b/slug#enquiry-42 (used in alert emails) open that enquiry.
-const openFromHash = () => {
-  const m = location.hash.match(/^#enquiry-(\d+)/);
+
+let settingsLoaded = false;
+async function route() {
+  const hash = location.hash;
+  const tab = hash === '#contacts' ? 'contacts' : hash === '#settings' ? 'settings' : 'dash';
+  state.tab = tab;
+  $('#viewDash').classList.toggle('hidden', tab !== 'dash');
+  $('#viewContacts').classList.toggle('hidden', tab !== 'contacts');
+  $('#viewSettings').classList.toggle('hidden', tab !== 'settings');
+  $$('.dash-only').forEach((el) => el.classList.toggle('hidden', tab !== 'dash'));
+  $$('[data-tab]').forEach((a) => (a.dataset.tab === tab ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
+  if (tab === 'contacts') Contacts.render();
+  if (tab === 'settings' && !settingsLoaded) {
+    settingsLoaded = true;
+    const ai = await call(`${base}/settings/ai`);
+    await SettingsUI.render($('#viewSettings'), {
+      base: `${base}/settings`,
+      call,
+      admin: false,
+      aiConfigured: ai.configured,
+      header: '<div class="card-head"><h1>Settings</h1><span class="muted">Changes apply as soon as you save</span></div>',
+      onCodeChanged: () => toast('Access code changed — use the new one next time you sign in'),
+      onSaved: () => load(),
+    });
+  }
+  const m = hash.match(/^#enquiry-(\d+)/);
   if (m) openDrawer(Number(m[1]));
-};
-window.addEventListener('hashchange', openFromHash);
-load().then(openFromHash);
-setInterval(() => { if (!state.openId && document.visibilityState === 'visible') load(); }, 60000);
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
+$$('[data-tab]').forEach((a) => a.addEventListener('click', (ev) => {
+  if (a.dataset.tab === 'dash') { ev.preventDefault(); history.pushState(null, '', location.pathname); route(); }
+}));
+
+load().then(route);
+setInterval(() => { if (state.tab === 'dash' && !state.openId && document.visibilityState === 'visible') load(); }, 60000);

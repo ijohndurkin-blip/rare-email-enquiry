@@ -78,6 +78,42 @@ function atLocalTime(fromIso, days, hhmm, timeZone) {
   return new Date(guess - tzOffsetMs(new Date(guess), tz)).toISOString();
 }
 
+function localYmd(date, timeZone) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).split('-').map(Number);
+}
+
+/** How to refer to the day of the enquiry from `at`: "earlier today", "yesterday", "on Monday", "on Monday 6 October". */
+function enquiryDay(receivedIso, at = Date.now(), timeZone = 'Europe/London') {
+  let tz = timeZone;
+  try { new Intl.DateTimeFormat('en-GB', { timeZone: tz }); } catch { tz = 'Europe/London'; }
+  const then = new Date(receivedIso);
+  const [y1, m1, d1] = localYmd(then, tz);
+  const [y2, m2, d2] = localYmd(new Date(at), tz);
+  const diff = Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+  const weekday = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'long' }).format(then);
+  if (diff <= 0) return 'earlier today';
+  if (diff === 1) return 'yesterday';
+  if (diff < 7) return `on ${weekday}`;
+  return `on ${weekday} ${new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: 'numeric', month: 'long' }).format(then)}`;
+}
+
+// Follow-up sequences: "phone" chases customers who left no number; "quiet" is the normal check-in.
+function sequenceFor(business, e) {
+  const a = business.settings.automations;
+  if (!e.phone && a.phoneChase.mode !== 'off') return 'phone';
+  return 'quiet';
+}
+
+function sequenceConfig(business, sequence) {
+  const a = business.settings.automations;
+  if (sequence === 'phone') {
+    const days = (a.phoneChase.days || []).map(Number).filter((n) => n > 0);
+    if (a.phoneChase.weekLater) days.push(7);
+    return { ...a.phoneChase, days };
+  }
+  return { ...a.followUp, days: (a.followUp.days || []).map(Number).filter((n) => n > 0) };
+}
+
 function cancel(enquiryId, kinds, statuses = ['draft', 'scheduled'], exceptId = null) {
   db.prepare(`UPDATE outbox SET status = 'cancelled' WHERE enquiry_id = ? AND kind IN (${kinds.map(() => '?').join(',')})
     AND status IN (${statuses.map(() => '?').join(',')}) AND id IS NOT ?`).run(enquiryId, ...kinds, ...statuses, exceptId);
@@ -112,15 +148,19 @@ async function analyse(business, enquiryId) {
  * Write a reply or follow-up. Uses AI when chosen and available, otherwise the template.
  * @returns {Promise<{subject:string, body:string, writtenBy:'ai'|'template', note?:string}>}
  */
-async function write(business, e, purpose, { step = 1, instruction = '', previousDraft = '', forceAI = false } = {}) {
+async function write(business, e, purpose, { step = 1, instruction = '', previousDraft = '', forceAI = false, sequence = 'quiet' } = {}) {
   const a = business.settings.automations;
   const info = business.settings.info;
-  const cfg = purpose === 'followup' ? a.followUp : a.reply;
-  const askPhone = a.reply.askPhone && !e.phone;
+  const phoneChase = purpose === 'followup' && sequence === 'phone';
+  const cfg = phoneChase ? a.phoneChase : purpose === 'followup' ? a.followUp : a.reply;
+  const askPhone = (a.reply.askPhone || phoneChase) && !e.phone;
+  const when = enquiryDay(e.received_at, Date.now(), info.timezone);
   let note;
   if ((cfg.writer === 'ai' || forceAI || instruction) && ai.isConfigured()) {
     try {
-      const d = await ai.draftReply(business, threadText(business, e), purpose, { askPhone, followUpNumber: step, instruction, previousDraft });
+      const d = await ai.draftReply(business, threadText(business, e), phoneChase ? 'phonechase' : purpose, {
+        askPhone, followUpNumber: step, instruction, previousDraft, enquiryWhen: when,
+      });
       return { subject: d.subject || reSubject(e.subject), body: d.body, writtenBy: 'ai' };
     } catch (err) {
       note = `AI couldn't write this one (${err.message}), so the template was used.`;
@@ -133,17 +173,19 @@ async function write(business, e, purpose, { step = 1, instruction = '', previou
     business_phone: info.phone || 'us',
     signature: info.signature || `The ${business.name} team`,
     subject: e.subject || '',
+    enquiry_day: when,
   };
   vars.phone_ask = askPhone ? fill(a.reply.phoneAsk, vars) : '';
-  const templates = a.followUp.templates.length ? a.followUp.templates : [''];
+  const source = phoneChase ? a.phoneChase.templates : a.followUp.templates;
+  const templates = source.length ? source : [''];
   const tpl = purpose === 'followup' ? templates[Math.min(step, templates.length) - 1] : a.reply.template;
   return { subject: reSubject(e.subject), body: fill(tpl, vars), writtenBy: 'template', note };
 }
 
-function insertOutbox(business, e, { kind, step = 0, status, auto, draft, dueAt = null }) {
-  const r = db.prepare(`INSERT INTO outbox (business_id, enquiry_id, kind, step, status, auto, subject, body, written_by, due_at, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(business.id, e.id, kind, step, status, auto ? 1 : 0, draft?.subject ?? null, draft?.body ?? null, draft?.writtenBy ?? null, dueAt, draft?.note ?? null);
+function insertOutbox(business, e, { kind, step = 0, status, auto, draft, dueAt = null, sequence = 'quiet' }) {
+  const r = db.prepare(`INSERT INTO outbox (business_id, enquiry_id, kind, step, status, auto, subject, body, written_by, due_at, error, sequence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(business.id, e.id, kind, step, status, auto ? 1 : 0, draft?.subject ?? null, draft?.body ?? null, draft?.writtenBy ?? null, dueAt, draft?.note ?? null, sequence);
   return Number(r.lastInsertRowid);
 }
 
@@ -244,19 +286,22 @@ async function onInbound({ businessId, enquiryId, action }) {
 function onOutbound({ businessId, enquiryId, sentAt, outboxId }) {
   const business = enq.getBusiness('id', businessId);
   if (!business) return;
-  const fu = business.settings.automations.followUp;
-  const sent = outboxId ? db.prepare('SELECT kind, step FROM outbox WHERE id = ?').get(outboxId) : null;
+  const sent = outboxId ? db.prepare('SELECT kind, step, sequence FROM outbox WHERE id = ?').get(outboxId) : null;
   // Whatever was waiting to answer them is now out of date.
   cancel(enquiryId, ['reply'], ['draft', 'scheduled'], outboxId);
-  const nextStep = sent?.kind === 'followup' ? sent.step + 1 : 1;
-  if (nextStep === 1) cancel(enquiryId, ['followup']);
-  const days = (fu.days || []).map(Number).filter((n) => n > 0);
-  if (fu.mode === 'off' || nextStep > days.length) return;
   const e = getRow(enquiryId);
-  if (!OPEN.includes(e.status)) return;
+  if (!e || e.deleted_at || !OPEN.includes(e.status)) return;
+  // A follow-up just went out: carry on with the same sequence. Otherwise start afresh.
+  const continuing = sent?.kind === 'followup';
+  const nextStep = continuing ? sent.step + 1 : 1;
+  if (!continuing) cancel(enquiryId, ['followup']);
+  const sequence = continuing ? sent.sequence : sequenceFor(business, e);
+  if (sequence === 'phone' && e.phone) return; // they've given a number: chasing is done
+  const cfg = sequenceConfig(business, sequence);
+  if (cfg.mode === 'off' || nextStep > cfg.days.length) return;
   insertOutbox(business, e, {
-    kind: 'followup', step: nextStep, status: 'scheduled', auto: fu.mode === 'auto',
-    dueAt: atLocalTime(sentAt, days[nextStep - 1], fu.sendAt, business.settings.info.timezone),
+    kind: 'followup', step: nextStep, status: 'scheduled', auto: cfg.mode === 'auto', sequence,
+    dueAt: atLocalTime(sentAt, cfg.days[nextStep - 1], cfg.sendAt, business.settings.info.timezone),
   });
 }
 
@@ -272,11 +317,12 @@ async function processDue() {
       const business = enq.getBusiness('id', o.business_id);
       const e = getRow(o.enquiry_id);
       const stop = (reason) => db.prepare(`UPDATE outbox SET status = 'cancelled', error = ? WHERE id = ?`).run(reason, o.id);
-      if (!e || !OPEN.includes(e.status)) { stop('Enquiry closed'); continue; }
+      if (!e || e.deleted_at || !OPEN.includes(e.status)) { stop('Enquiry closed'); continue; }
+      if (o.sequence === 'phone' && e.phone) { stop('They gave a phone number'); continue; }
       if (o.kind === 'followup' && e.last_response_at && e.last_inbound_at > e.last_response_at) { stop('Customer replied'); continue; }
       if (o.kind === 'reply' && e.last_response_at && e.last_response_at > o.created_at) { stop('Already answered'); continue; }
       if (!o.body) {
-        const draft = await write(business, e, o.kind, { step: o.step });
+        const draft = await write(business, e, o.kind, { step: o.step, sequence: o.sequence });
         db.prepare('UPDATE outbox SET subject = ?, body = ?, written_by = ?, error = ? WHERE id = ?').run(draft.subject, draft.body, draft.writtenBy, draft.note || null, o.id);
       }
       if (!o.auto || !mailer.canSend(business)) {
@@ -304,7 +350,7 @@ async function draftNow(business, enquiryId, { instruction = '' } = {}) {
   const existing = db.prepare(`SELECT * FROM outbox WHERE enquiry_id = ? AND status = 'draft' ORDER BY id DESC LIMIT 1`).get(enquiryId);
   const purpose = existing?.kind === 'followup' ? 'followup' : 'reply';
   const draft = await write(business, e, purpose, {
-    step: existing?.step || 1, instruction, previousDraft: instruction ? existing?.body : '', forceAI: true,
+    step: existing?.step || 1, instruction, previousDraft: instruction ? existing?.body : '', forceAI: true, sequence: existing?.sequence,
   });
   if (existing) {
     db.prepare('UPDATE outbox SET subject = ?, body = ?, written_by = ?, error = ? WHERE id = ?').run(draft.subject, draft.body, draft.writtenBy, draft.note || null, existing.id);
@@ -346,10 +392,14 @@ function start() {
   enq.events.on('outbound', (ev) => { try { onOutbound(ev); } catch (err) { console.error('[automations] outbound', err); } });
   if (process.env.DISABLE_SCHEDULER !== '1') {
     setInterval(() => processDue().catch((err) => console.error('[automations] scheduler', err)), 30000).unref();
+    // Empty trash older than 7 days, now and hourly.
+    const purge = () => { try { enq.purgeTrash(); } catch (err) { console.error('[trash] purge', err); } };
+    setTimeout(purge, 10000).unref();
+    setInterval(purge, 3600000).unref();
   }
 }
 
 module.exports = {
   start, processDue, draftNow, updateDraft, discard, sendDraft, sendNew, queue,
-  idle: () => Promise.all([...inflight]), atLocalTime, fill, write,
+  idle: () => Promise.all([...inflight]), atLocalTime, enquiryDay, fill, write,
 };

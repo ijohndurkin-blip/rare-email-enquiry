@@ -122,6 +122,22 @@ function loadDemo(business, { clear = true } = {}) {
       }
     });
 
+    // Show what the autopilot has sent, and a couple of returning customers.
+    const answered = created.filter((c) => db.prepare("SELECT 1 FROM messages WHERE enquiry_id = ? AND direction = 'out'").get(c.id)).slice(0, 4);
+    answered.forEach((c, i) => {
+      const m = db.prepare("SELECT id, subject, body, sent_at FROM messages WHERE enquiry_id = ? AND direction = 'out' ORDER BY sent_at LIMIT 1").get(c.id);
+      db.prepare('UPDATE messages SET auto = 1 WHERE id = ?').run(m.id);
+      const kind = i === 1 ? 'followup' : 'reply';
+      db.prepare(`INSERT INTO outbox (business_id, enquiry_id, kind, step, status, auto, subject, body, written_by, sent_at, sequence)
+        VALUES (?, ?, ?, ?, 'sent', 1, ?, ?, 'template', ?, ?)`)
+        .run(business.id, c.id, kind, kind === 'followup' ? 1 : 0, m.subject || 'Re: your enquiry', m.body, m.sent_at, i === 1 ? 'phone' : 'quiet');
+    });
+    created.filter((c) => c.ageH > 24).slice(0, 2).forEach((c) => {
+      if (db.prepare('SELECT 1 FROM contacts WHERE business_id = ? AND email = ?').get(business.id, c.email)) return;
+      db.prepare('INSERT INTO contacts (business_id, name, company, email, notes) VALUES (?, ?, ?, ?, ?)')
+        .run(business.id, c.name, c.ctx.company, c.email, 'Sample contact');
+    });
+
     // A few replies waiting for approval, as the autopilot would prepare them.
     const a = business.settings.automations.reply;
     const info = business.settings.info;

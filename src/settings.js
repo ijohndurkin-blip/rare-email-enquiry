@@ -44,6 +44,20 @@ const DEFAULT_SETTINGS = {
         "Hi {first_name},\n\nI didn't want your enquiry to slip through the cracks. If you're still interested, just reply to this email and we'll pick it up from there.\n\n{signature}",
       ],
     },
+    // If the customer didn't leave a phone number, chase for one after our first reply.
+    // Used instead of followUp for those customers.
+    phoneChase: {
+      mode: 'off', // off | draft | auto
+      days: [1, 1], // days after each previous email: "1, 1" = the next day, then the day after
+      weekLater: true, // and one more a week after the last
+      writer: 'template', // ai | template
+      sendAt: '09:30',
+      templates: [
+        "Hi {first_name},\n\nFollowing up on the enquiry you sent us {enquiry_day}. It would be great to have a quick chat so we can give you an accurate answer. What's the best number to reach you on? Or feel free to call us on {business_phone}.\n\n{signature}",
+        "Hi {first_name},\n\nJust checking in about your enquiry {enquiry_day}. If you reply with a contact number, we'll give you a quick call at a time that suits you, or you can ring us on {business_phone}.\n\n{signature}",
+        "Hi {first_name},\n\nI wanted to try one last time about the enquiry you sent us {enquiry_day}. If you're still interested, just reply with your number or call us on {business_phone} and we'll pick it straight up.\n\n{signature}",
+      ],
+    },
     alerts: {
       enabled: false,
       email: '',
@@ -82,6 +96,9 @@ const DEFAULT_SETTINGS = {
       'no-reply', 'noreply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster',
       'notifications@', 'newsletter',
     ],
+    // "Always hot": if at least hotMinMatches of these words/phrases appear, the lead is hot.
+    hotTerms: [],
+    hotMinMatches: 2,
     minBudget: 0,
     currency: '£',
   },

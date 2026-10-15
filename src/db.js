@@ -117,6 +117,24 @@ ensureColumn('enquiries', 'ai_details', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('enquiries', 'ai_temperature', "TEXT CHECK (ai_temperature IN ('hot','warm','cold'))");
 ensureColumn('enquiries', 'ai_reason', 'TEXT');
 ensureColumn('messages', 'auto', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('enquiries', 'force_hot', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('enquiries', 'deleted_at', 'TEXT'); // in the trash since; purged after 7 days
+ensureColumn('outbox', 'sequence', "TEXT NOT NULL DEFAULT 'quiet'"); // follow-up sequence: quiet | phone
+
+db.exec(`
+  -- Previous customers, so their new emails can be recognised.
+  CREATE TABLE IF NOT EXISTS contacts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT '',
+    company     TEXT NOT NULL DEFAULT '',
+    email       TEXT NOT NULL DEFAULT '',
+    phone       TEXT NOT NULL DEFAULT '',
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_contacts_business ON contacts(business_id);
+`);
 
 function getAppSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);

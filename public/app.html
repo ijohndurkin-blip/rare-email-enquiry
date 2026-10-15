@@ -13,20 +13,25 @@
         <div class="brand-mark" id="brandMark">·</div>
         <div class="brand-name" id="brandName">Enquiries</div>
       </div>
+      <nav class="tabs" aria-label="Sections">
+        <a href="#" data-tab="dash" aria-current="page">Enquiries</a>
+        <a href="#contacts" data-tab="contacts">Contacts</a>
+        <a href="#settings" data-tab="settings">Settings</a>
+      </nav>
       <div class="spacer"></div>
-      <span class="muted hide-sm" id="syncStatus"></span>
-      <div class="segmented" role="group" aria-label="Time period" id="period">
+      <span class="muted hide-sm dash-only" id="syncStatus"></span>
+      <div class="segmented dash-only" role="group" aria-label="Time period" id="period">
         <button type="button" data-days="7">7 days</button>
         <button type="button" data-days="30" aria-pressed="true">30 days</button>
         <button type="button" data-days="90">90 days</button>
       </div>
-      <button type="button" class="primary" id="addBtn">+ Add enquiry</button>
+      <button type="button" class="primary dash-only" id="addBtn">+ Add enquiry</button>
       <a class="btn ghost hidden" id="adminLink" href="/admin">Admin</a>
       <button type="button" class="ghost" id="logout">Sign out</button>
     </div>
   </header>
 
-  <main class="wrap">
+  <main class="wrap" id="viewDash">
     <div class="banner hidden" id="banner"></div>
     <div class="approvals hidden" id="approvals" role="region" aria-label="Replies to check"></div>
 
@@ -53,14 +58,25 @@
           <div class="table-wrap" id="chartTable"></div>
         </details>
       </div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Reply to these next</h2>
-            <div class="sub">Hottest and longest-waiting first</div>
+      <div class="side-stack">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Reply to these next</h2>
+              <div class="sub">Hottest and longest-waiting first</div>
+            </div>
           </div>
+          <ul class="attn" id="attention"></ul>
         </div>
-        <ul class="attn" id="attention"></ul>
+        <div class="card" id="autoCard">
+          <div class="card-head">
+            <div>
+              <h2>Sent automatically</h2>
+              <div class="sub" id="autoSub">Emails the autopilot sent for you</div>
+            </div>
+          </div>
+          <ul class="attn" id="autoList"></ul>
+        </div>
       </div>
     </section>
 
@@ -90,12 +106,37 @@
           <option value="won">Won</option>
           <option value="lost">Lost</option>
           <option value="spam">Junk</option>
+          <option value="trash">Trash</option>
         </select>
         <label class="chk"><input type="checkbox" id="fAwaiting"> Needs a reply</label>
+        <label class="chk"><input type="checkbox" id="fReturning"> Previous customers</label>
       </div>
+      <div class="banner hidden" id="trashNote" style="background:var(--surface-2);color:var(--ink-2)"></div>
       <div id="enquiries"></div>
     </section>
   </main>
+
+  <main class="wrap hidden" id="viewContacts">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Contacts</h2>
+          <div class="sub">Previous customers. When they email again, their enquiry is marked <span class="pill returning">★ Previous customer</span></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" id="importBtn">Import from spreadsheet</button>
+          <button type="button" class="primary" id="newContactBtn">+ Add contact</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input class="search" type="search" id="cq" placeholder="Search contacts…" aria-label="Search contacts">
+        <span class="muted" id="contactCount"></span>
+      </div>
+      <div id="contactList"></div>
+    </section>
+  </main>
+
+  <main class="wrap hidden" id="viewSettings"></main>
 
   <div class="scrim hidden" id="scrim"></div>
   <aside class="drawer hidden" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dWho"></aside>
@@ -119,7 +160,43 @@
     </form>
   </dialog>
 
+  <dialog id="contactDialog">
+    <form id="contactForm">
+      <h2 style="margin-bottom:14px" id="cTitle">Add a contact</h2>
+      <div class="dl">
+        <div class="field"><label for="cName">Name</label><input id="cName" name="name"></div>
+        <div class="field"><label for="cCompany">Company</label><input id="cCompany" name="company"></div>
+        <div class="field"><label for="cEmail">Email</label><input id="cEmail" name="email" type="email"></div>
+        <div class="field"><label for="cPhone">Phone</label><input id="cPhone" name="phone"></div>
+      </div>
+      <div class="field"><label for="cNotes">Notes</label><textarea id="cNotes" name="notes" placeholder="What they bought, preferences, anything useful…"></textarea></div>
+      <div class="err" id="cErr"></div>
+      <div class="foot">
+        <button type="button" class="danger hidden" id="cDelete" style="margin-right:auto">Delete</button>
+        <button type="button" id="cCancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="importDialog">
+    <form id="importForm">
+      <h2 style="margin-bottom:6px">Import contacts</h2>
+      <p class="ink-2" style="margin-top:0">Choose a <b>.csv</b> file (in Excel: File → Save As → CSV), or copy the rows in Excel or Google Sheets and paste them below. Columns: <b>name, company, email, phone, notes</b> — a header row is fine. Existing emails are updated, not duplicated.</p>
+      <div class="field"><label for="iFile">CSV file</label><input id="iFile" type="file" accept=".csv,text/csv,text/plain"></div>
+      <div class="field"><label for="iPaste">…or paste rows</label><textarea id="iPaste" rows="6" placeholder="Pat Jones&#9;Jones Ltd&#9;pat@jones.co.uk&#9;07700 900777&#9;Bought 500 flyers"></textarea></div>
+      <div class="result" id="iPreview"></div>
+      <div class="err" id="iErr"></div>
+      <div class="foot">
+        <button type="button" id="iCancel">Cancel</button>
+        <button type="submit" class="primary" id="iGo" disabled>Import</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="/assets/common.js"></script>
+  <script src="/assets/settings-ui.js"></script>
+  <script src="/assets/contacts.js"></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

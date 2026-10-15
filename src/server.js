@@ -11,6 +11,7 @@ const automations = require('./automations');
 const knowledge = require('./knowledge');
 const autoconfig = require('./autoconfig');
 const mailer = require('./mailer');
+const contacts = require('./contacts');
 
 automations.start();
 
@@ -102,6 +103,20 @@ function adminView(b) {
   };
 }
 
+// Business settings: the same API serves the admin (any business) and each
+// business owner (their own business, from their dashboard).
+const settingsApi = express.Router({ mergeParams: true });
+
+function loadBusinessById(req, res, next) {
+  const b = enq.getBusiness('id', Number(req.params.id));
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  req.business = b;
+  return next();
+}
+
+app.use('/api/admin/businesses/:id', requireAdmin, loadBusinessById, settingsApi);
+app.use('/api/b/:slug/settings', (req, res, next) => loadBusiness(req, res, next), settingsApi);
+
 app.get('/api/admin/businesses', requireAdmin, (req, res) => {
   const rows = db.prepare('SELECT id FROM businesses ORDER BY name').all();
   res.json(rows.map(({ id }) => {
@@ -129,18 +144,16 @@ app.post('/api/admin/businesses', requireAdmin, (req, res) => {
   res.status(201).json({ ...adminView(b), accessCode });
 });
 
-app.get('/api/admin/businesses/:id', requireAdmin, (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  res.json(adminView(b));
-});
+settingsApi.get('/', (req, res) => res.json({ ...adminView(req.business), canEditAddress: isAdmin(req) }));
 
-app.put('/api/admin/businesses/:id', requireAdmin, (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
+settingsApi.get('/ai', (req, res) => res.json({ configured: ai.isConfigured() }));
+
+settingsApi.put('/', (req, res) => {
+  const b = req.business;
   const body = req.body || {};
   const name = String(body.name ?? b.name).trim() || b.name;
-  const slug = body.slug ? slugify(body.slug) : b.slug;
+  // Only the admin can move a dashboard to a new address.
+  const slug = body.slug && isAdmin(req) ? slugify(body.slug) : b.slug;
   if (slug !== b.slug && db.prepare('SELECT 1 FROM businesses WHERE slug = ? AND id != ?').get(slug, b.id)) {
     return res.status(409).json({ error: `The address "${slug}" is already used by another business` });
   }
@@ -153,6 +166,8 @@ app.put('/api/admin/businesses/:id', requireAdmin, (req, res) => {
     .slice(0, 500)
     .map((p) => ({ item: str(p.item, 200), price: str(p.price, 80), notes: str(p.notes, 300) }));
   settings.automations.followUp.days = settings.automations.followUp.days.map(Number).filter((n) => n > 0 && n <= 90).slice(0, 5);
+  settings.automations.phoneChase.days = settings.automations.phoneChase.days.map(Number).filter((n) => n > 0 && n <= 30).slice(0, 5);
+  settings.scoring.hotMinMatches = Math.min(5, Math.max(1, Math.round(Number(settings.scoring.hotMinMatches) || 2)));
   // Keep the stored password unless a new one was typed.
   const pw = incoming.inbox?.password;
   settings.inbox.password = pw && pw !== '********' ? sec.encrypt(pw) : b.settings.inbox.password;
@@ -161,7 +176,7 @@ app.put('/api/admin/businesses/:id', requireAdmin, (req, res) => {
     .run(name, slug, color, JSON.stringify(settings), accessHash, b.id);
   const updated = enq.getBusiness('id', b.id);
   if (body.rescore !== false) enq.rescoreAll(updated);
-  res.json(adminView(updated));
+  res.json({ ...adminView(updated), canEditAddress: isAdmin(req) });
 });
 
 app.delete('/api/admin/businesses/:id', requireAdmin, (req, res) => {
@@ -181,14 +196,13 @@ app.post('/api/admin/businesses/:id/clear', requireAdmin, (req, res) => {
   res.json({ deleted: Number(r.changes) });
 });
 
-app.post('/api/admin/businesses/:id/rotate-token', requireAdmin, (req, res) => {
-  db.prepare('UPDATE businesses SET inbound_token = ? WHERE id = ?').run(sec.randomToken(), Number(req.params.id));
-  res.json(adminView(enq.getBusiness('id', Number(req.params.id))));
+settingsApi.post('/rotate-token', (req, res) => {
+  db.prepare('UPDATE businesses SET inbound_token = ? WHERE id = ?').run(sec.randomToken(), req.business.id);
+  res.json(adminView(enq.getBusiness('id', req.business.id)));
 });
 
-app.post('/api/admin/businesses/:id/test-inbox', requireAdmin, wrap(async (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
+settingsApi.post('/test-inbox', wrap(async (req, res) => {
+  const b = req.business;
   const settings = merge(b.settings, { inbox: req.body?.inbox || {} });
   const pw = req.body?.inbox?.password;
   settings.inbox.password = pw && pw !== '********' ? sec.encrypt(pw) : b.settings.inbox.password;
@@ -199,9 +213,9 @@ app.post('/api/admin/businesses/:id/test-inbox', requireAdmin, wrap(async (req, 
   }
 }));
 
-app.post('/api/admin/businesses/:id/sync', requireAdmin, wrap(async (req, res) => {
+settingsApi.post('/sync', wrap(async (req, res) => {
   try {
-    res.json(await inbox.syncBusiness(Number(req.params.id)));
+    res.json(await inbox.syncBusiness(req.business.id));
   } catch (err) {
     res.status(400).json({ error: err.responseText || err.message });
   }
@@ -250,9 +264,8 @@ app.post('/api/admin/ai/test', requireAdmin, wrap(async (req, res) => {
 
 // --- Connect a mailbox from just address + password ---------------------------------
 
-app.post('/api/admin/businesses/:id/connect-email', requireAdmin, wrap(async (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
+settingsApi.post('/connect-email', wrap(async (req, res) => {
+  const b = req.business;
   const { email, password } = req.body || {};
   const pw = password === '********' ? sec.decrypt(b.settings.inbox.password) : password;
   const result = await autoconfig.discover(email, pw);
@@ -280,11 +293,10 @@ app.post('/api/admin/businesses/:id/connect-email', requireAdmin, wrap(async (re
 // --- Learn about the business from its website ------------------------------------------
 
 const jobs = new Map(); // in-memory progress for long-running website reads
-app.post('/api/admin/businesses/:id/website/read', requireAdmin, (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
+settingsApi.post('/website/read', (req, res) => {
+  const b = req.business;
   const { mode = 'site', website = '', pages = [], maxPages = 20 } = req.body || {};
-  const job = { id: sec.randomToken(8), status: 'running', log: [], result: null, error: null };
+  const job = { id: sec.randomToken(8), businessId: b.id, status: 'running', log: [], result: null, error: null };
   jobs.set(job.id, job);
   setTimeout(() => jobs.delete(job.id), 3600000).unref();
   (async () => {
@@ -323,21 +335,20 @@ app.post('/api/admin/businesses/:id/website/read', requireAdmin, (req, res) => {
   res.status(202).json({ jobId: job.id });
 });
 
-app.get('/api/admin/jobs/:id', requireAdmin, (req, res) => {
-  const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
+settingsApi.get('/jobs/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job || job.businessId !== req.business.id) return res.status(404).json({ error: 'Job not found' });
   res.json(job);
 });
 
-app.get('/api/admin/businesses/:id/website/pages', requireAdmin, (req, res) => {
-  res.json(knowledge.listPages(Number(req.params.id)).map((p) => ({ url: p.url, title: p.title, chars: p.text.length, fetchedAt: p.fetchedAt })));
+settingsApi.get('/website/pages', (req, res) => {
+  res.json(knowledge.listPages(req.business.id).map((p) => ({ url: p.url, title: p.title, chars: p.text.length, fetchedAt: p.fetchedAt })));
 });
 
 // Try the AI on a made-up enquiry, to check the knowledge and tone before going live.
-app.post('/api/admin/businesses/:id/test-reply', requireAdmin, wrap(async (req, res) => {
-  const b = enq.getBusiness('id', Number(req.params.id));
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  if (!ai.isConfigured()) return res.status(400).json({ error: 'Add an AI key under AI settings first.' });
+settingsApi.post('/test-reply', wrap(async (req, res) => {
+  const b = req.business;
+  if (!ai.isConfigured()) return res.status(400).json({ error: 'AI isn\'t switched on yet.' });
   const { message = '', name = 'Alex', hasPhone = false } = req.body || {};
   const thread = `Customer: ${name} <customer@example.com>${hasPhone ? ', phone 07700 900123' : ', no phone number given'}\n\n--- Message from customer\nSubject: Enquiry\n\n${message}`;
   try {
@@ -407,7 +418,7 @@ app.delete('/api/b/:slug/outbox/:oid', loadBusiness, (req, res) => {
 });
 
 app.get('/api/b/:slug/enquiries', loadBusiness, (req, res) => {
-  res.json(enq.listEnquiries(req.business, { includeSpam: req.query.spam === '1' }));
+  res.json(enq.listEnquiries(req.business, { includeSpam: req.query.spam === '1', trash: req.query.trash === '1' }));
 });
 
 app.get('/api/b/:slug/enquiries/:id', loadBusiness, (req, res) => {
@@ -434,6 +445,63 @@ app.post('/api/b/:slug/enquiries', loadBusiness, (req, res) => {
   const r = enq.ingest(req.business, { fromEmail: email, fromName, phone, subject: subject || 'Manual enquiry', body, source: 'manual' });
   if (r.action === 'skipped') return res.status(400).json({ error: `Not added: ${r.reason}` });
   res.status(201).json(enq.getEnquiry(req.business, r.id));
+});
+
+// --- Trash: deleted enquiries are kept for 7 days, then removed for good ---------------
+
+app.delete('/api/b/:slug/enquiries/:id', loadBusiness, (req, res) => {
+  if (!enq.trashEnquiry(req.business, Number(req.params.id))) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+app.post('/api/b/:slug/enquiries/:id/restore', loadBusiness, (req, res) => {
+  if (!enq.restoreEnquiry(req.business, Number(req.params.id))) return res.status(404).json({ error: 'Not found' });
+  res.json(enq.getEnquiry(req.business, Number(req.params.id)));
+});
+
+app.delete('/api/b/:slug/trash/:id', loadBusiness, (req, res) => {
+  if (!enq.deleteForever(req.business, Number(req.params.id))) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/b/:slug/trash', loadBusiness, (req, res) => res.json({ deleted: enq.emptyTrash(req.business) }));
+
+// --- Contacts: previous customers ---------------------------------------------------------
+
+app.get('/api/b/:slug/contacts', loadBusiness, (req, res) => res.json(contacts.list(req.business.id)));
+
+const contactError = (res, err) => res.status(400).json({ error: err.message });
+
+app.post('/api/b/:slug/contacts', loadBusiness, (req, res) => {
+  try { res.status(201).json(contacts.create(req.business.id, req.body || {})); } catch (err) { contactError(res, err); }
+});
+
+app.post('/api/b/:slug/contacts/import', loadBusiness, (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No rows to import' });
+  res.json(contacts.importRows(req.business.id, rows));
+});
+
+app.patch('/api/b/:slug/contacts/:cid', loadBusiness, (req, res) => {
+  const c = contacts.update(req.business.id, Number(req.params.cid), req.body || {});
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  res.json(c);
+});
+
+app.delete('/api/b/:slug/contacts/:cid', loadBusiness, (req, res) => {
+  if (!contacts.remove(req.business.id, Number(req.params.cid))) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// Save the sender of an enquiry as a contact.
+app.post('/api/b/:slug/enquiries/:id/contact', loadBusiness, (req, res) => {
+  const e = enq.getEnquiry(req.business, Number(req.params.id));
+  if (!e) return res.status(404).json({ error: 'Not found' });
+  try {
+    const realEmail = e.fromEmail.endsWith('@manual.local') ? '' : e.fromEmail;
+    contacts.create(req.business.id, { name: e.fromName || '', email: realEmail, phone: e.phone || '', ...(req.body || {}) });
+    res.json(enq.getEnquiry(req.business, e.id));
+  } catch (err) { contactError(res, err); }
 });
 
 app.post('/api/b/:slug/sync', loadBusiness, wrap(async (req, res) => {
@@ -522,7 +590,8 @@ app.get('/api/cron/:key', wrap(async (req, res) => {
     const synced = await inbox.syncDue();
     await automations.idle();
     await automations.processDue();
-    res.json({ ok: true, synced, at: new Date().toISOString() });
+    const purged = enq.purgeTrash();
+    res.json({ ok: true, synced, purged, at: new Date().toISOString() });
   } finally {
     cronRunning = false;
   }
